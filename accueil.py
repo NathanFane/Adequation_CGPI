@@ -17,6 +17,11 @@ CODE_PAR_NOM = {r["nom"]: r["code"] for r in REFERENCES}
 
 
 
+def premier(valeur):
+    """Un même ISIN peut figurer dans plusieurs contrats : on prend sa première valeur."""
+    return valeur.iloc[0] if isinstance(valeur, pd.Series) else valeur
+
+
 # ---------- Accès aux données ----------
 
 def mes_contrats() -> pd.DataFrame:
@@ -169,7 +174,7 @@ with onglet_liste:
                 .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut, derniere_vl, indice_reference, indice_manuel)")
                 .in_("contrat_id", contrats["id"].tolist()).execute().data)
         df = pd.DataFrame([{
-            "Retirer": False,
+            "Retirer du contrat": False,
             "ISIN": r["isin"],
             "Nom": r["produits"]["nom"] or "—",
             "Type": r["produits"]["type_produit"],
@@ -181,7 +186,7 @@ with onglet_liste:
                                     else AUTO),
             "Indice retenu": PAR_CODE.get(r["produits"]["indice_reference"], {}).get("nom"),
             "contrat_id": r["contrat_id"],
-        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au",
+        } for r in rows], columns=["Retirer du contrat", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au",
                                    "Indice de référence", "Indice retenu", "contrat_id"])
 
         # Récupération des VL (EODHD) pour les produits de l'utilisateur
@@ -234,7 +239,25 @@ with onglet_liste:
         if df.empty:
             st.info("Aucun produit.")
         else:
-            st.caption(f"{len(df)} produit(s) · {(df['Statut'] == 'introuvable').sum()} introuvable(s)")
+            # Annulation du dernier enregistrement
+            if precedent := st.session_state.get("dernier_enregistrement"):
+                c1, c2 = st.columns([4, 1])
+                c1.success(precedent["resume"] + " enregistré(s).")
+                if c2.button("Annuler", help="Rétablit la situation d'avant le dernier enregistrement"):
+                    for l in precedent["retraits"]:
+                        db.table("contrat_produits").upsert(l, on_conflict="contrat_id,isin").execute()
+                    for isin, type_avant in precedent["types"]:
+                        db.table("produits").update({"type_produit": type_avant}).eq("isin", isin).execute()
+                    for isin, maj in precedent["indices"]:
+                        db.table("produits").update(maj).eq("isin", isin).execute()
+                    if precedent["indices"]:
+                        calculer_et_enregistrer(db, [i for i, _ in precedent["indices"]])
+                    del st.session_state["dernier_enregistrement"]
+                    st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+                    st.rerun()
+
+            st.caption(f"{len(df)} produit(s) · {(df['Statut'] == 'introuvable').sum()} introuvable(s) · "
+                       "cochez « Retirer du contrat » ou modifiez le type ou l'indice, puis enregistrez.")
             df = df.sort_values(["Contrat", "Nom"]).reset_index(drop=True)
             edite = st.data_editor(
                 df,
@@ -263,17 +286,41 @@ with onglet_liste:
                     "Corrélation à l'indice": st.column_config.NumberColumn(
                         help="Corrélation des rendements hebdomadaires avec l'indice retenu", format="%.2f"),
                 },
-                key="tableau",
+                key=f"tableau_{st.session_state.get('version_tableau', 0)}",
             )
-            a_retirer = edite[edite["Retirer"]]
+            a_retirer = edite[edite["Retirer du contrat"]]
             types_modifies = edite[(edite["Type"] != df["Type"]) & edite["Type"].notna()][["ISIN", "Type"]].drop_duplicates()
             indices_modifies = edite[edite["Indice de référence"] != df["Indice de référence"]][
                 ["ISIN", "Indice de référence"]].drop_duplicates("ISIN")
             nb = len(a_retirer) + len(types_modifies) + len(indices_modifies)
-            if st.button(f"Enregistrer ({nb} modification(s))", type="primary", disabled=nb == 0):
+            resume = ", ".join(x for x in [
+                f"{len(a_retirer)} retrait(s) du contrat" if len(a_retirer) else "",
+                f"{len(types_modifies)} type(s) modifié(s)" if len(types_modifies) else "",
+                f"{len(indices_modifies)} indice(s) modifié(s)" if len(indices_modifies) else "",
+            ] if x)
+
+            b1, b2, _ = st.columns([2, 2, 3])
+            enregistrer = b1.button(f"Enregistrer : {resume}" if nb else "Aucune modification", type="primary",
+                                    disabled=nb == 0, width="stretch")
+            if b2.button("Annuler les modifications", disabled=nb == 0, width="stretch",
+                         help="Remet le tableau dans son état d'origine, sans rien enregistrer"):
+                st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+                st.rerun()
+
+            if enregistrer:
+                avant = df.set_index("ISIN")
+                precedent = {
+                    "resume": resume,
+                    "retraits": [{"contrat_id": int(l["contrat_id"]), "isin": l["ISIN"]} for _, l in a_retirer.iterrows()],
+                    "types": [(l["ISIN"], premier(avant.loc[l["ISIN"], "Type"])) for _, l in types_modifies.iterrows()],
+                    "indices": [],
+                }
                 for _, l in types_modifies.iterrows():
                     db.table("produits").update({"type_produit": l["Type"]}).eq("isin", l["ISIN"]).execute()
                 for _, l in indices_modifies.iterrows():
+                    ancien = premier(avant.loc[l["ISIN"], "Indice de référence"])
+                    precedent["indices"].append((l["ISIN"], {"indice_manuel": False} if ancien == AUTO
+                                                 else {"indice_reference": CODE_PAR_NOM[ancien], "indice_manuel": True}))
                     choix_indice = l["Indice de référence"]
                     db.table("produits").update(
                         {"indice_manuel": False} if choix_indice == AUTO
@@ -285,6 +332,8 @@ with onglet_liste:
                 for _, l in a_retirer.iterrows():
                     (db.table("contrat_produits").delete()
                      .eq("contrat_id", int(l["contrat_id"])).eq("isin", l["ISIN"]).execute())
+                st.session_state["dernier_enregistrement"] = precedent
+                st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
                 st.rerun()
 
 
