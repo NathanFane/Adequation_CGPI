@@ -1,0 +1,20 @@
+name: Test Morningstar
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/test_morningstar.py"
+      - ".github/workflows/test_morningstar.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mstarpy
+      - run: python scripts/test_morningstar.py
