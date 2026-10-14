@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 from supabase import create_client
 
+from collecte import mettre_a_jour
 from isin import est_valide, extraire, normaliser
 from openfigi import TYPES, infos_produits
 
@@ -179,7 +180,7 @@ with onglet_liste:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
     else:
         rows = (db.table("contrat_produits")
-                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut)")
+                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut, derniere_vl)")
                 .in_("contrat_id", contrats["id"].tolist()).execute().data)
         df = pd.DataFrame([{
             "Retirer": False,
@@ -188,8 +189,26 @@ with onglet_liste:
             "Type": r["produits"]["type_produit"],
             "Contrat": r["contrats"]["nom"],
             "Statut": r["produits"]["statut"],
+            "VL jusqu'au": r["produits"]["derniere_vl"],
             "contrat_id": r["contrat_id"],
-        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "contrat_id"])
+        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au", "contrat_id"])
+
+        # Récupération des VL (EODHD) pour les produits de l'utilisateur
+        if st.button("Récupérer les données", help="Télécharge les VL manquantes de vos produits"):
+            barre = st.progress(0.0, text="Démarrage…")
+            rapport = mettre_a_jour(db, st.secrets["EODHD_API_KEY"], df["ISIN"].unique().tolist(),
+                                    progression=lambda x, nom: barre.progress(x, text=nom))
+            barre.empty()
+            st.session_state["rapport_vl"] = rapport
+            st.rerun()
+        if rv := st.session_state.pop("rapport_vl", None):
+            total = sum(n for _, n in rv["maj"])
+            if rv["maj"] or not (rv["sans_donnees"] or rv["erreur"]):
+                st.success(f"{total} VL ajoutée(s) pour {len(rv['maj'])} produit(s). Les autres étaient à jour.")
+            if rv["sans_donnees"]:
+                st.warning("Aucune VL trouvée pour : " + ", ".join(rv["sans_donnees"]))
+            if rv["erreur"]:
+                st.error(rv["erreur"] + " — réessayez demain ou passez à l'offre payante.")
 
         f1, f2 = st.columns(2)
         filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
@@ -207,7 +226,7 @@ with onglet_liste:
             edite = st.data_editor(
                 df,
                 hide_index=True, width="stretch",
-                disabled=["ISIN", "Nom", "Contrat", "Statut"],
+                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au"],
                 column_config={
                     "contrat_id": None,
                     "Type": st.column_config.SelectboxColumn("Type", options=TYPES),

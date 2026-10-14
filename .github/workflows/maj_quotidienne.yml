@@ -1,0 +1,22 @@
+name: Mise à jour quotidienne des VL
+
+on:
+  schedule:
+    - cron: "0 6 * * 2-6"   # du mardi au samedi à 6 h UTC (VL de la veille)
+  workflow_dispatch:
+
+jobs:
+  maj:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install supabase requests
+      - run: python scripts/maj_quotidienne.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}

@@ -22,6 +22,8 @@ create table produits (
   isin        char(12) primary key check (isin ~ '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'),
   nom         text,
   type_produit text check (type_produit in ('fonds', 'etf', 'action', 'obligation', 'scpi', 'autre')),
+  ticker_eodhd text,
+  derniere_vl  date,
   statut      text not null default 'a_verifier'
               check (statut in ('a_verifier', 'valide', 'invalide', 'introuvable')),
   date_ajout  timestamptz not null default now()
@@ -39,6 +41,7 @@ create table historique (
   isin  char(12) not null references produits(isin) on delete cascade,
   date  date     not null,
   vl    numeric(18,6) not null,
+  vl_ajustee numeric(18,6),
   primary key (isin, date)
 );
 
