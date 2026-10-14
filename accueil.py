@@ -8,7 +8,12 @@ from calculs import calculer_et_enregistrer
 from collecte import mettre_a_jour
 from base import USER_ID, db
 from isin import est_valide, extraire, normaliser
+from indices import PAR_CODE, REFERENCES
 from openfigi import TYPES, infos_produits
+
+AUTO = "Automatique (meilleure corrélation)"
+NOMS_INDICES = [AUTO] + [r["nom"] for r in REFERENCES]
+CODE_PAR_NOM = {r["nom"]: r["code"] for r in REFERENCES}
 
 
 
@@ -161,7 +166,7 @@ with onglet_liste:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
     else:
         rows = (db.table("contrat_produits")
-                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut, derniere_vl)")
+                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut, derniere_vl, indice_reference, indice_manuel)")
                 .in_("contrat_id", contrats["id"].tolist()).execute().data)
         df = pd.DataFrame([{
             "Retirer": False,
@@ -171,8 +176,13 @@ with onglet_liste:
             "Contrat": r["contrats"]["nom"],
             "Statut": r["produits"]["statut"],
             "VL jusqu'au": r["produits"]["derniere_vl"],
+            "Indice de référence": (PAR_CODE[r["produits"]["indice_reference"]]["nom"]
+                                    if r["produits"]["indice_manuel"] and r["produits"]["indice_reference"] in PAR_CODE
+                                    else AUTO),
+            "Indice retenu": PAR_CODE.get(r["produits"]["indice_reference"], {}).get("nom"),
             "contrat_id": r["contrat_id"],
-        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au", "contrat_id"])
+        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au",
+                                   "Indice de référence", "Indice retenu", "contrat_id"])
 
         # Récupération des VL (EODHD) pour les produits de l'utilisateur
         if st.button("Récupérer les données", help="Télécharge les VL manquantes de vos produits"):
@@ -198,16 +208,20 @@ with onglet_liste:
                            if m["insuffisants"] else ""))
 
         # Dernières métriques de chaque produit
-        mets = (db.table("metriques").select("isin, date_calcul, var_cf, volatilite, sharpe, sortino")
+        mets = (db.table("metriques").select("isin, date_calcul, rendement_annuel, volatilite, var_cf, cvar, "
+                                             "max_drawdown, recouvrement_jours, sharpe, sortino, correlation_indice")
                 .in_("isin", df["ISIN"].unique().tolist() or [""]).order("date_calcul", desc=True)
                 .execute().data)
         dernieres = {}
         for m in mets:
             dernieres.setdefault(m["isin"], m)
-        df["VaR 97,5 % 1 an"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("var_cf"))
-        df["Volatilité"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("volatilite"))
-        df["Sharpe"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("sharpe"))
-        df["Sortino"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("sortino"))
+        COLONNES_METRIQUES = {
+            "Rendement annuel": "rendement_annuel", "Volatilité": "volatilite", "VaR 97,5 % 1 an": "var_cf",
+            "CVaR 1 jour": "cvar", "Max Drawdown": "max_drawdown", "Recouvrement (jours)": "recouvrement_jours",
+            "Sharpe": "sharpe", "Sortino": "sortino", "Corrélation à l'indice": "correlation_indice",
+        }
+        for colonne, champ in COLONNES_METRIQUES.items():
+            df[colonne] = df["ISIN"].map(lambda i, c=champ: (dernieres.get(i) or {}).get(c))
 
         f1, f2 = st.columns(2)
         filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
@@ -225,8 +239,8 @@ with onglet_liste:
             edite = st.data_editor(
                 df,
                 hide_index=True, width="stretch",
-                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au",
-                          "VaR 97,5 % 1 an", "Volatilité", "Sharpe", "Sortino"],
+                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au", "Indice retenu",
+                          *COLONNES_METRIQUES],
                 column_config={
                     "contrat_id": None,
                     "Type": st.column_config.SelectboxColumn("Type", options=TYPES),
@@ -234,17 +248,40 @@ with onglet_liste:
                         help="Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)",
                         format="percent"),
                     "Volatilité": st.column_config.NumberColumn(help="Volatilité annualisée", format="percent"),
+                    "Rendement annuel": st.column_config.NumberColumn(format="percent"),
+                    "CVaR 1 jour": st.column_config.NumberColumn(
+                        help="Perte moyenne lors des 2,5 % pires jours", format="percent"),
+                    "Max Drawdown": st.column_config.NumberColumn(
+                        help="Pire baisse depuis un plus haut", format="percent"),
+                    "Recouvrement (jours)": st.column_config.NumberColumn(
+                        help="Jours entre le point bas et le retour au plus haut (vide : pas encore revenu)"),
                     "Sharpe": st.column_config.NumberColumn(format="%.2f"),
                     "Sortino": st.column_config.NumberColumn(format="%.2f"),
+                    "Indice de référence": st.column_config.SelectboxColumn(
+                        options=NOMS_INDICES, width="medium",
+                        help="Automatique : l'indice le plus corrélé au produit. Vous pouvez en imposer un."),
+                    "Corrélation à l'indice": st.column_config.NumberColumn(
+                        help="Corrélation des rendements hebdomadaires avec l'indice retenu", format="%.2f"),
                 },
                 key="tableau",
             )
             a_retirer = edite[edite["Retirer"]]
             types_modifies = edite[(edite["Type"] != df["Type"]) & edite["Type"].notna()][["ISIN", "Type"]].drop_duplicates()
-            nb = len(a_retirer) + len(types_modifies)
+            indices_modifies = edite[edite["Indice de référence"] != df["Indice de référence"]][
+                ["ISIN", "Indice de référence"]].drop_duplicates("ISIN")
+            nb = len(a_retirer) + len(types_modifies) + len(indices_modifies)
             if st.button(f"Enregistrer ({nb} modification(s))", type="primary", disabled=nb == 0):
                 for _, l in types_modifies.iterrows():
                     db.table("produits").update({"type_produit": l["Type"]}).eq("isin", l["ISIN"]).execute()
+                for _, l in indices_modifies.iterrows():
+                    choix_indice = l["Indice de référence"]
+                    db.table("produits").update(
+                        {"indice_manuel": False} if choix_indice == AUTO
+                        else {"indice_reference": CODE_PAR_NOM[choix_indice], "indice_manuel": True}
+                    ).eq("isin", l["ISIN"]).execute()
+                if len(indices_modifies):
+                    with st.spinner("Recalcul des corrélations…"):
+                        calculer_et_enregistrer(db, indices_modifies["ISIN"].tolist())
                 for _, l in a_retirer.iterrows():
                     (db.table("contrat_produits").delete()
                      .eq("contrat_id", int(l["contrat_id"])).eq("isin", l["ISIN"]).execute())

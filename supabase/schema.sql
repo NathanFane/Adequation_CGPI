@@ -24,6 +24,8 @@ create table produits (
   type_produit text check (type_produit in ('fonds', 'etf', 'action', 'obligation', 'scpi', 'autre')),
   ticker_eodhd text,
   derniere_vl  date,
+  indice_reference text,
+  indice_manuel    boolean not null default false,
   statut      text not null default 'a_verifier'
               check (statut in ('a_verifier', 'valide', 'invalide', 'introuvable')),
   date_ajout  timestamptz not null default now()
@@ -50,6 +52,12 @@ create table metriques (
   isin           char(12) not null references produits(isin) on delete cascade,
   date_calcul    date     not null,
   var_cf         numeric,               -- VaR Cornish-Fisher
+  rendement_annuel   numeric,
+  cvar               numeric,
+  max_drawdown       numeric,
+  recouvrement_jours integer,
+  correlation_indice numeric,
+  indice_reference   text,
   volatilite     numeric,
   sharpe         numeric,
   sortino        numeric,
@@ -57,6 +65,14 @@ create table metriques (
   sfdr           smallint check (sfdr in (6, 8, 9)),
   frais_courants numeric,
   primary key (isin, date_calcul)
+);
+
+-- 7. Cours des ETF servant d'indices de référence
+create table indices_historique (
+  ticker  text not null,
+  date    date not null,
+  valeur  numeric(18,6) not null,
+  primary key (ticker, date)
 );
 
 create index on contrats (user_id);
@@ -69,6 +85,7 @@ alter table contrat_produits enable row level security;
 alter table produits         enable row level security;
 alter table historique       enable row level security;
 alter table metriques        enable row level security;
+alter table indices_historique enable row level security;
 
 create policy "profil personnel" on utilisateurs
   for all using (id = auth.uid()) with check (id = auth.uid());
@@ -89,3 +106,4 @@ create policy "produits modification" on produits for update to authenticated us
 -- (écriture par la tâche quotidienne avec la clé service_role, qui contourne ces règles)
 create policy "historique lecture" on historique for select to authenticated using (true);
 create policy "metriques lecture"  on metriques  for select to authenticated using (true);
+create policy "indices lecture"    on indices_historique for select to authenticated using (true);

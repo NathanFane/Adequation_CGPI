@@ -55,6 +55,22 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
     var_rendement = sigma * math.sqrt(n) * z - 0.5 * sigma ** 2 * n
     var_cf = -(math.exp(var_rendement) - 1) if sigma else 0.0
 
+    # CVaR historique quotidienne : perte moyenne des 2,5 % pires jours
+    seuil = r.quantile(0.025)
+    pires = r[r <= seuil]
+    cvar = -float(pires.mean())
+
+    # Max Drawdown et temps de recouvrement (du point bas au retour au plus haut précédent)
+    plus_haut = vl.cummax()
+    baisse_depuis_haut = vl / plus_haut - 1
+    date_bas = baisse_depuis_haut.idxmin()
+    max_dd = -float(baisse_depuis_haut.min())
+    date_haut = vl.loc[:date_bas].idxmax()
+    apres = vl.loc[date_bas:]
+    retour = apres[apres >= vl.loc[date_haut]]
+    date_retour = retour.index[0] if len(retour) else None
+    recouvrement = (date_retour - date_bas).days if date_retour is not None and max_dd > 0 else None
+
     # Sortino : volatilité des seuls rendements inférieurs au taux sans risque
     rf_jour = (1 + rf) ** (1 / JOURS) - 1
     baisse = np.minimum(r - rf_jour, 0)
@@ -66,6 +82,11 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
         "rendement": float(rendement), "vol_jour": float(vol_jour), "volatilite": float(vol),
         "sigma_log": float(sigma), "skew": float(s), "kurt": float(k), "n": n, "z": float(z),
         "var_rendement": float(var_rendement), "var_cf": float(var_cf),
+        "seuil_cvar": float(seuil), "nb_pires": len(pires), "cvar": cvar,
+        "max_drawdown": max_dd, "date_haut": date_haut.date(), "date_bas": date_bas.date(),
+        "vl_haut": float(vl.loc[date_haut]), "vl_bas": float(vl.loc[date_bas]),
+        "date_retour": date_retour.date() if date_retour is not None else None,
+        "recouvrement_jours": recouvrement,
         "rf": rf, "rf_jour": rf_jour, "nb_baisse": int((baisse < 0).sum()), "vol_baisse": float(vol_baisse),
         "sharpe": float((rendement - rf) / vol) if vol else None,
         "sortino": float((rendement - rf) / vol_baisse) if vol_baisse else None,
@@ -78,6 +99,10 @@ def metriques(vl: pd.Series, rf: float | None) -> dict | None:
     if d is None:
         return None
     return {
+        "rendement_annuel": round(d["rendement"], 6),
+        "cvar": round(d["cvar"], 6),
+        "max_drawdown": round(d["max_drawdown"], 6),
+        "recouvrement_jours": d["recouvrement_jours"],
         "var_cf": round(d["var_cf"], 6),
         "volatilite": round(d["volatilite"], 6),
         "sharpe": round(d["sharpe"], 4) if d["sharpe"] is not None else None,
@@ -102,24 +127,92 @@ def lire_historique(db, isin: str, depuis: dt.date) -> pd.Series:
     return pd.Series(valeurs.values, index=pd.to_datetime(df["date"]))
 
 
+MIN_SEMAINES = 26
+
+
+def lire_indices(db) -> pd.DataFrame:
+    """Cours de tous les ETF de référence : une colonne par ticker."""
+    lignes, debut = [], 0
+    while True:
+        page = (db.table("indices_historique").select("ticker, date, valeur")
+                .order("ticker").order("date").range(debut, debut + 999).execute().data)
+        lignes += page
+        if len(page) < 1000:
+            break
+        debut += 1000
+    if not lignes:
+        return pd.DataFrame()
+    df = pd.DataFrame(lignes)
+    df["date"] = pd.to_datetime(df["date"])
+    return df.pivot(index="date", columns="ticker", values="valeur").astype(float)
+
+
+def rendements_hebdo(serie: pd.Series | pd.DataFrame):
+    """Rendements hebdomadaires (cours du vendredi) : évite le décalage d'un jour entre
+    la VL d'un fonds et la clôture d'un ETF."""
+    return serie.resample("W-FRI").last().pct_change(fill_method=None).iloc[1:]
+
+
+def rendements_references(cours: pd.DataFrame) -> pd.DataFrame:
+    """Rendements hebdomadaires de chaque indice de référence (mixtes rééquilibrés chaque semaine)."""
+    from indices import REFERENCES
+    if cours.empty:
+        return pd.DataFrame()
+    hebdo = rendements_hebdo(cours)
+    colonnes = {}
+    for ref in REFERENCES:
+        tickers = list(ref["composition"])
+        if not all(t in hebdo.columns for t in tickers):
+            continue
+        poids = pd.Series(ref["composition"])
+        colonnes[ref["code"]] = (hebdo[tickers] * poids[tickers]).sum(axis=1, min_count=len(tickers))
+    return pd.DataFrame(colonnes)
+
+
+def correlations(vl: pd.Series, refs: pd.DataFrame) -> pd.Series:
+    """Corrélation des rendements hebdomadaires du produit avec chaque indice (au moins 26 semaines communes)."""
+    if refs.empty or vl.empty:
+        return pd.Series(dtype=float)
+    r = rendements_hebdo(vl).rename("produit")
+    jointure = refs.join(r, how="inner")
+    res = {}
+    for code in refs.columns:
+        paire = jointure[[code, "produit"]].dropna()
+        if len(paire) >= MIN_SEMAINES:
+            res[code] = paire[code].corr(paire["produit"])
+    return pd.Series(res).sort_values(ascending=False)
+
+
 def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5) -> dict:
-    """Calcule les métriques des produits valides et les enregistre (une ligne par produit et par jour)."""
-    requete = db.table("produits").select("isin").eq("statut", "valide")
+    """Calcule les métriques des produits valides et les enregistre (une ligne par produit et par jour).
+
+    L'indice de référence de chaque produit est celui qui lui est le plus corrélé, sauf s'il a été
+    choisi à la main par un CGPI.
+    """
+    requete = db.table("produits").select("isin, indice_reference, indice_manuel").eq("statut", "valide")
     if isins is not None:
         requete = requete.in_("isin", isins)
-    produits = [p["isin"] for p in requete.execute().data]
+    produits = requete.execute().data
 
     depuis = dt.date.today() - dt.timedelta(days=365 * annees)
     rf = taux_sans_risque(depuis)
+    refs = rendements_references(lire_indices(db))
     rapport = {"calcules": [], "insuffisants": [], "taux_sans_risque": rf}
     lignes = []
-    for isin in produits:
-        m = metriques(lire_historique(db, isin, depuis), rf)
+    for p in produits:
+        vl = lire_historique(db, p["isin"], depuis)
+        m = metriques(vl, rf)
         if m is None:
-            rapport["insuffisants"].append(isin)
+            rapport["insuffisants"].append(p["isin"])
             continue
-        lignes.append({"isin": isin, "date_calcul": dt.date.today().isoformat(), **m})
-        rapport["calcules"].append(isin)
+        corr = correlations(vl, refs)
+        indice = p["indice_reference"] if p["indice_manuel"] else (corr.index[0] if len(corr) else None)
+        if not p["indice_manuel"] and indice != p["indice_reference"]:
+            db.table("produits").update({"indice_reference": indice}).eq("isin", p["isin"]).execute()
+        m["indice_reference"] = indice
+        m["correlation_indice"] = round(float(corr[indice]), 4) if indice in corr.index else None
+        lignes.append({"isin": p["isin"], "date_calcul": dt.date.today().isoformat(), **m})
+        rapport["calcules"].append(p["isin"])
     if lignes:
         db.table("metriques").upsert(lignes, on_conflict="isin,date_calcul").execute()
     return rapport

@@ -81,3 +81,34 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
             rapport["sans_donnees"].append(p["isin"])
         db.table("produits").update(maj).eq("isin", p["isin"]).execute()
     return rapport
+
+
+def mettre_a_jour_indices(db) -> dict:
+    """Télécharge les cours des ETF de référence (yfinance, dividendes réinvestis)."""
+    import pandas as pd
+    import yfinance as yf
+
+    from indices import TICKERS
+
+    # Téléchargement complet à chaque fois : les cours ajustés des dates passées changent
+    # à chaque détachement de dividende, une mise à jour partielle créerait des ruptures.
+    rapport = {"maj": 0, "echecs": []}
+    lots = [(TICKERS, dt.date.today() - dt.timedelta(days=365 * PROFONDEUR_ANS))]
+
+    for tickers, debut in lots:
+        df = yf.download(tickers, start=debut.isoformat(), auto_adjust=True, progress=False,
+                         group_by="ticker", threads=True)
+        for t in tickers:
+            try:
+                serie = (df[t]["Close"] if isinstance(df.columns, pd.MultiIndex) else df["Close"]).dropna()
+            except KeyError:
+                serie = pd.Series(dtype=float)
+            if serie.empty:
+                rapport["echecs"].append(t)
+                continue
+            lignes = [{"ticker": t, "date": d.date().isoformat(), "valeur": round(float(v), 6)}
+                      for d, v in serie.items()]
+            for i in range(0, len(lignes), 1000):
+                db.table("indices_historique").upsert(lignes[i:i + 1000], on_conflict="ticker,date").execute()
+            rapport["maj"] += len(lignes)
+    return rapport

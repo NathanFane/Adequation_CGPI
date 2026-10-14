@@ -5,7 +5,9 @@ import pandas as pd
 import streamlit as st
 
 from base import USER_ID, db
-from calculs import JOURS, MIN_POINTS, detail, lire_historique, taux_sans_risque
+from calculs import (JOURS, MIN_POINTS, MIN_SEMAINES, correlations, detail, lire_historique, lire_indices,
+                     rendements_references, taux_sans_risque)
+from indices import PAR_CODE, REFERENCES
 
 
 def pct(x, d=2):
@@ -80,6 +82,35 @@ st.latex(r"\text{Sortino} = \frac{R - r_f}{\sigma_{baisse}} \qquad "
 st.markdown("Comme le Sharpe, mais seule la volatilité **à la baisse** est pénalisée : "
             "un fonds qui monte fortement n'est pas sanctionné.")
 
+st.subheader("CVaR (Conditional Value at Risk) quotidienne")
+st.latex(r"\text{CVaR} = -\,\text{moyenne}\left(r_t \;\middle|\; r_t \le q_{2{,}5\%}\right)")
+st.markdown("Perte moyenne lors des 2,5 % pires jours de la période. Là où la VaR donne un seuil, "
+            "la CVaR mesure **l'ampleur** des pertes au-delà de ce seuil. Calculée sur l'historique réel, "
+            "sans hypothèse de loi.")
+
+st.subheader("Max Drawdown et temps de recouvrement")
+st.latex(r"\text{Max Drawdown} = -\min_t\left(\frac{VL_t}{\max_{s \le t} VL_s} - 1\right)")
+st.markdown("Pire baisse subie entre un plus haut et le point bas qui suit. Le **temps de recouvrement** "
+            "est le nombre de jours entre ce point bas et le retour au plus haut précédent ; "
+            "il reste vide si le produit n'est pas encore revenu à ce niveau.")
+
+st.subheader("Corrélation à l'indice de référence")
+st.latex(r"\rho = \frac{\text{cov}(R^{hebdo}_{produit},\,R^{hebdo}_{indice})}{\sigma_{produit}\,\sigma_{indice}}")
+st.markdown(f"""
+- Calculée sur les **rendements hebdomadaires** (cours du vendredi) : les VL des fonds sont souvent
+  publiées avec un jour de décalage par rapport à la clôture des marchés, ce qui fausserait une corrélation quotidienne.
+- Au moins {MIN_SEMAINES} semaines communes.
+- **Indice retenu** : par défaut, celui des {len(REFERENCES)} indices ci-dessous qui est le **plus corrélé** au produit.
+  Le CGPI peut en imposer un autre dans le tableau.
+- Chaque indice est représenté par un ETF (cours dividendes réinvestis, source Yahoo Finance) ;
+  les indices mixtes combinent plusieurs ETF, rééquilibrés chaque semaine.
+""")
+with st.expander(f"Liste des {len(REFERENCES)} indices de référence"):
+    st.dataframe(pd.DataFrame([{
+        "Catégorie": r["categorie"], "Indice": r["nom"],
+        "ETF utilisé(s)": " + ".join(f"{int(p * 100)} % {t}" if p < 1 else t for t, p in r["composition"].items()),
+    } for r in REFERENCES]), hide_index=True, width="stretch")
+
 # ---------- 3. Calcul pas à pas ----------
 st.header("3. Calcul pas à pas sur un de vos produits")
 
@@ -149,6 +180,35 @@ else:
         st.latex(rf"\text{{Sortino}} = \frac{{{tpct(d['rendement'])} - {tpct(d['rf'], 3)}}}"
                  rf"{{{tpct(d['vol_baisse'])}}} = {tnb(d['sortino'], 2)}")
 
+        st.subheader("Étape 5 : CVaR")
+        st.markdown(f"Seuil des 2,5 % pires jours : rendement ≤ {pct(d['seuil_cvar'])}, "
+                    f"soit {d['nb_pires']} jours sur {d['nb_rendements']}.")
+        st.latex(rf"\text{{CVaR}} = -\text{{moyenne de ces {d['nb_pires']} rendements}} = {tpct(d['cvar'])}")
+
+        st.subheader("Étape 6 : Max Drawdown et recouvrement")
+        st.markdown(f"""
+| | Date | VL |
+|---|---|---|
+| Plus haut | {d['date_haut']:%d/%m/%Y} | {nb(d['vl_haut'], 2)} |
+| Point bas | {d['date_bas']:%d/%m/%Y} | {nb(d['vl_bas'], 2)} |
+| Retour au plus haut | {f"{d['date_retour']:%d/%m/%Y}" if d['date_retour'] else "pas encore"} | |
+""")
+        st.latex(rf"\text{{Max Drawdown}} = -\left(\frac{{{tnb(d['vl_bas'], 2)}}}{{{tnb(d['vl_haut'], 2)}}} - 1\right)"
+                 rf" = {tpct(d['max_drawdown'])}")
+        st.markdown(f"Temps de recouvrement : **{d['recouvrement_jours']} jours**" if d["recouvrement_jours"] is not None
+                    else "Temps de recouvrement : **non mesurable**, le produit n'est pas revenu à son plus haut.")
+
+        st.subheader("Étape 7 : corrélation aux indices")
+        with st.spinner("Lecture des indices…"):
+            corr = correlations(vl, rendements_references(lire_indices(db)))
+        if corr.empty:
+            st.info("Indices pas encore chargés : ils le seront lors de la prochaine mise à jour quotidienne.")
+        else:
+            st.markdown(f"Indice le plus corrélé : **{PAR_CODE[corr.index[0]]['nom']}** (ρ = {nb(corr.iloc[0], 2)}).")
+            st.dataframe(pd.DataFrame({"Indice": [PAR_CODE[c]["nom"] for c in corr.index[:10]],
+                                       "Corrélation": corr.values[:10].round(3)}),
+                         hide_index=True, width="stretch")
+
 # ---------- 4. Limites ----------
 st.header("4. Limites")
 st.markdown("""
@@ -156,4 +216,7 @@ st.markdown("""
 - **Passé ≠ futur** : toutes ces mesures sont historiques.
 - **Sharpe et Sortino** dépendent de la période : un même fonds peut changer de classement d'une année à l'autre.
 - **Cornish-Fisher** reste une approximation : elle devient instable pour des distributions très asymétriques.
+- **CVaR quotidienne** : elle mesure un risque sur un jour, à ne pas comparer directement à la VaR sur un an.
+- **Indices de référence** : ce sont des approximations par ETF ; l'indice officiel du prospectus peut différer.
+  Les indices Royaume-Uni et Suisse sont en devise locale.
 """)
