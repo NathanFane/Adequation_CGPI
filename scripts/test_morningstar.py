@@ -5,7 +5,7 @@ import traceback
 
 import mstarpy
 
-ISINS = ["FR0010135103", "FR0000292278", "FR0010148981", "LU1681043599", "FR0011550185"]
+ISINS = ["FR0010135103", "LU1681043599"]
 session = None
 
 
@@ -41,7 +41,19 @@ for isin in ISINS:
     except Exception as e:
         print("VL : ERREUR", type(e).__name__, str(e)[:200])
 
-    for methode in ["snapshot", "riskScore", "sustainability", "feeMifid"]:
+    for methode in ["graphData", "historicalData"]:
+        try:
+            data = getattr(f, methode)()
+            apercu = json.dumps(data, default=str)
+            print(f"{methode} : {len(apercu)} car. ; début : {apercu[:600]}")
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(v, list):
+                        print(f"   liste {k} : {len(v)} éléments ; premier = {json.dumps(v[0], default=str)[:200] if v else None} ; dernier = {json.dumps(v[-1], default=str)[:200] if v else None}")
+        except Exception as e:
+            print(f"{methode} : ERREUR", type(e).__name__, str(e)[:200])
+
+    for methode in []:
         try:
             data = getattr(f, methode)()
             hits = chercher(data, ["srri", "sri", "riskindicator", "priip", "sfdr", "article", "ongoing"])
