@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 from supabase import create_client
 
+from calculs import calculer_et_enregistrer
 from collecte import mettre_a_jour
 from isin import est_valide, extraire, normaliser
 from openfigi import TYPES, infos_produits
@@ -198,6 +199,8 @@ with onglet_liste:
             barre = st.progress(0.0, text="Démarrage…")
             rapport = mettre_a_jour(db, st.secrets["EODHD_API_KEY"], df["ISIN"].unique().tolist(),
                                     progression=lambda x, nom: barre.progress(x, text=nom))
+            barre.progress(1.0, text="Calcul des métriques…")
+            rapport["metriques"] = calculer_et_enregistrer(db, df["ISIN"].unique().tolist())
             barre.empty()
             st.session_state["rapport_vl"] = rapport
             st.rerun()
@@ -209,6 +212,22 @@ with onglet_liste:
                 st.warning("Aucune VL trouvée pour : " + ", ".join(rv["sans_donnees"]))
             if rv["erreur"]:
                 st.error(rv["erreur"] + " — réessayez demain ou passez à l'offre payante.")
+            if m := rv.get("metriques"):
+                st.info(f"Métriques calculées pour {len(m['calcules'])} produit(s)."
+                        + (f" Historique insuffisant (moins de 6 mois) : {', '.join(m['insuffisants'])}."
+                           if m["insuffisants"] else ""))
+
+        # Dernières métriques de chaque produit
+        mets = (db.table("metriques").select("isin, date_calcul, var_cf, volatilite, sharpe, sortino")
+                .in_("isin", df["ISIN"].unique().tolist() or [""]).order("date_calcul", desc=True)
+                .execute().data)
+        dernieres = {}
+        for m in mets:
+            dernieres.setdefault(m["isin"], m)
+        df["VaR 97,5 % 1 an"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("var_cf"))
+        df["Volatilité"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("volatilite"))
+        df["Sharpe"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("sharpe"))
+        df["Sortino"] = df["ISIN"].map(lambda i: (dernieres.get(i) or {}).get("sortino"))
 
         f1, f2 = st.columns(2)
         filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
@@ -226,10 +245,17 @@ with onglet_liste:
             edite = st.data_editor(
                 df,
                 hide_index=True, width="stretch",
-                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au"],
+                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au",
+                          "VaR 97,5 % 1 an", "Volatilité", "Sharpe", "Sortino"],
                 column_config={
                     "contrat_id": None,
                     "Type": st.column_config.SelectboxColumn("Type", options=TYPES),
+                    "VaR 97,5 % 1 an": st.column_config.NumberColumn(
+                        help="Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)",
+                        format="percent"),
+                    "Volatilité": st.column_config.NumberColumn(help="Volatilité annualisée", format="percent"),
+                    "Sharpe": st.column_config.NumberColumn(format="%.2f"),
+                    "Sortino": st.column_config.NumberColumn(format="%.2f"),
                 },
                 key="tableau",
             )
