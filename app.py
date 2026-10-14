@@ -6,7 +6,7 @@ import streamlit as st
 from supabase import create_client
 
 from isin import est_valide, extraire, normaliser
-from openfigi import noms_produits
+from openfigi import TYPES, infos_produits
 
 st.set_page_config(page_title="Adéquation CGPI", page_icon="📊", layout="wide")
 
@@ -65,18 +65,25 @@ def importer(lignes: list[tuple[str, str, str | None]]) -> dict:
     if not valides:
         return rapport
 
-    # Produits : on ne cherche le nom que des ISIN inconnus ou sans nom
+    # Produits : on ne cherche que les ISIN inconnus, sans nom ou sans type
     isins = sorted({v[0] for v in valides})
-    connus = {p["isin"]: p for p in db.table("produits").select("isin, nom").in_("isin", isins).execute().data}
-    a_chercher = [i for i in isins if not (connus.get(i) or {}).get("nom")]
+    connus = {p["isin"]: p for p in db.table("produits").select("isin, nom, type_produit")
+              .in_("isin", isins).execute().data}
+    a_chercher = [i for i in isins
+                  if not (connus.get(i) or {}).get("nom") or not (connus.get(i) or {}).get("type_produit")]
     if a_chercher:
-        with st.spinner(f"Recherche du nom de {len(a_chercher)} produit(s)…"):
-            noms = noms_produits(a_chercher, st.secrets.get("OPENFIGI_KEY"))
-        db.table("produits").upsert([
-            {"isin": i, "nom": noms.get(i), "statut": "valide" if i in noms else "introuvable"}
-            for i in a_chercher
-        ], on_conflict="isin").execute()
-        rapport["introuvables"] = [i for i in a_chercher if i not in noms]
+        with st.spinner(f"Recherche de {len(a_chercher)} produit(s)…"):
+            infos = infos_produits(a_chercher, st.secrets.get("OPENFIGI_KEY"))
+        lignes_produits = []
+        for i in a_chercher:
+            if i in infos:
+                lignes_produits.append({"isin": i, "nom": (connus.get(i) or {}).get("nom") or infos[i]["nom"],
+                                        "type_produit": infos[i]["type"], "statut": "valide"})
+            elif i not in connus:
+                lignes_produits.append({"isin": i, "nom": None, "type_produit": None, "statut": "introuvable"})
+        if lignes_produits:
+            db.table("produits").upsert(lignes_produits, on_conflict="isin").execute()
+        rapport["introuvables"] = [i for i in a_chercher if i not in infos]
 
     # Liaisons contrat <-> produit
     ids = {}
@@ -172,34 +179,47 @@ with onglet_liste:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
     else:
         rows = (db.table("contrat_produits")
-                .select("contrat_id, isin, contrats(nom), produits(nom, statut)")
+                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut)")
                 .in_("contrat_id", contrats["id"].tolist()).execute().data)
         df = pd.DataFrame([{
             "Retirer": False,
             "ISIN": r["isin"],
             "Nom": r["produits"]["nom"] or "—",
+            "Type": r["produits"]["type_produit"],
             "Contrat": r["contrats"]["nom"],
             "Statut": r["produits"]["statut"],
             "contrat_id": r["contrat_id"],
-        } for r in rows])
+        } for r in rows], columns=["Retirer", "ISIN", "Nom", "Type", "Contrat", "Statut", "contrat_id"])
 
-        filtre = st.multiselect("Filtrer par contrat", list(contrats["nom"]))
-        if filtre and not df.empty:
+        f1, f2 = st.columns(2)
+        filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
+        filtre_type = f2.multiselect("Filtrer par type", TYPES)
+        if filtre:
             df = df[df["Contrat"].isin(filtre)]
+        if filtre_type:
+            df = df[df["Type"].isin(filtre_type)]
 
         if df.empty:
             st.info("Aucun produit.")
         else:
             st.caption(f"{len(df)} produit(s) · {(df['Statut'] == 'introuvable').sum()} introuvable(s)")
+            df = df.sort_values(["Contrat", "Nom"]).reset_index(drop=True)
             edite = st.data_editor(
-                df.sort_values(["Contrat", "Nom"]),
+                df,
                 hide_index=True, width="stretch",
                 disabled=["ISIN", "Nom", "Contrat", "Statut"],
-                column_config={"contrat_id": None},
+                column_config={
+                    "contrat_id": None,
+                    "Type": st.column_config.SelectboxColumn("Type", options=TYPES),
+                },
                 key="tableau",
             )
             a_retirer = edite[edite["Retirer"]]
-            if st.button(f"Retirer {len(a_retirer)} ligne(s)", disabled=a_retirer.empty):
+            types_modifies = edite[(edite["Type"] != df["Type"]) & edite["Type"].notna()][["ISIN", "Type"]].drop_duplicates()
+            nb = len(a_retirer) + len(types_modifies)
+            if st.button(f"Enregistrer ({nb} modification(s))", type="primary", disabled=nb == 0):
+                for _, l in types_modifies.iterrows():
+                    db.table("produits").update({"type_produit": l["Type"]}).eq("isin", l["ISIN"]).execute()
                 for _, l in a_retirer.iterrows():
                     (db.table("contrat_produits").delete()
                      .eq("contrat_id", int(l["contrat_id"])).eq("isin", l["ISIN"]).execute())

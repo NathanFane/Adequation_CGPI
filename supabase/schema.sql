@@ -21,6 +21,7 @@ create table contrats (
 create table produits (
   isin        char(12) primary key check (isin ~ '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'),
   nom         text,
+  type_produit text check (type_produit in ('fonds', 'etf', 'action', 'obligation', 'scpi', 'autre')),
   statut      text not null default 'a_verifier'
               check (statut in ('a_verifier', 'valide', 'invalide', 'introuvable')),
   date_ajout  timestamptz not null default now()
@@ -79,6 +80,7 @@ create policy "liaisons personnelles" on contrat_produits
 -- Produits : lecture et ajout par tout utilisateur connecté
 create policy "produits lecture" on produits for select to authenticated using (true);
 create policy "produits ajout"   on produits for insert to authenticated with check (true);
+create policy "produits modification" on produits for update to authenticated using (true) with check (true);
 
 -- Historique et métriques : lecture seule côté site
 -- (écriture par la tâche quotidienne avec la clé service_role, qui contourne ces règles)
