@@ -1,0 +1,64 @@
+# Questionnaire d'adéquation – assurance-vie (DDA)
+version: "0.1"
+date: 2026-10-14
+
+piliers:
+  - id: connaissances
+    libelle: Connaissances et expérience
+    questions:
+      - id: Q1
+        texte: "Avez-vous déjà investi en unités de compte ?"
+        type: choix_unique
+        options:
+          - { valeur: jamais, libelle: "Jamais", score: 0 }
+          - { valeur: occasionnellement, libelle: "Occasionnellement", score: 1 }
+          - { valeur: regulierement, libelle: "Régulièrement", score: 2 }
+
+  - id: capacite_pertes
+    libelle: Situation financière et capacité à subir des pertes
+    questions:
+      - id: Q2
+        texte: "Part de votre patrimoine placée sur ce contrat ?"
+        type: choix_unique
+        options:
+          - { valeur: moins_10, libelle: "Moins de 10 %", score: 2 }
+          - { valeur: "10_30", libelle: "Entre 10 et 30 %", score: 1 }
+          - { valeur: plus_30, libelle: "Plus de 30 %", score: 0 }
+
+  - id: tolerance
+    libelle: Tolérance au risque
+    questions:
+      - id: Q3
+        texte: "Perte maximale acceptée sur un an ?"
+        type: choix_unique
+        options:
+          - { valeur: "0", libelle: "Aucune perte", score: 0, contrainte: { sri_max: 2 } }
+          - { valeur: "10", libelle: "Jusqu'à 10 %", score: 1, contrainte: { sri_max: 3 } }
+          - { valeur: "20", libelle: "Jusqu'à 20 %", score: 2, contrainte: { sri_max: 5 } }
+          - { valeur: "30+", libelle: "30 % ou plus", score: 3, contrainte: { sri_max: 7 } }
+        # Justification : correspondance perte → SRI à discuter dans le mémoire
+
+  - id: objectifs
+    libelle: Objectifs et horizon
+    questions:
+      - id: Q4
+        texte: "Horizon de placement ?"
+        type: choix_unique
+        options:
+          - { valeur: moins_3_ans, libelle: "Moins de 3 ans", score: 0, contrainte: { part_uc_max: 0.3 } }
+          - { valeur: "3_8_ans", libelle: "3 à 8 ans", score: 1, contrainte: { part_uc_max: 0.6 } }
+          - { valeur: plus_8_ans, libelle: "Plus de 8 ans", score: 2, contrainte: { part_uc_max: 1.0 } }
+
+  - id: durabilite
+    libelle: Préférences de durabilité
+    questions:
+      - id: Q5
+        texte: "Souhaitez-vous une part minimale d'investissements durables ?"
+        type: choix_unique
+        options:
+          - { valeur: non, libelle: "Non", contrainte: {} }
+          - { valeur: oui_art8, libelle: "Oui, fonds article 8 SFDR minimum", contrainte: { sfdr_min: 8 } }
+          - { valeur: oui_art9, libelle: "Oui, fonds article 9 SFDR", contrainte: { sfdr_min: 9 } }
+
+# Règle de profil : la contrainte la plus stricte l'emporte
+regle_profil: contrainte_la_plus_stricte

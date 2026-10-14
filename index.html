@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Questionnaire d'adéquation DDA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : colonne formulaire + panneau profil collant à droite, une colonne sur mobile */
+:root {
+  --bg: #f5f6f4; --surface: #ffffff; --fg: #1d2523; --muted: #5d6a66;
+  --line: #d9dfdc; --accent: #1f6f5c; --accent-soft: #e2f0eb; --warn: #9a5b12;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121615; --surface: #1a201e; --fg: #e3e9e6; --muted: #93a19c;
+  --line: #2c3532; --accent: #5cc0a3; --accent-soft: #1d332c; --warn: #e0a85a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121615; --surface: #1a201e; --fg: #e3e9e6; --muted: #93a19c;
+  --line: #2c3532; --accent: #5cc0a3; --accent-soft: #1d332c; --warn: #e0a85a; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 48px; }
+header h1 { font-size: 1.6rem; font-weight: 600; margin: 0 0 4px; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 65ch; }
+.tag { display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+  color: var(--warn); border: 1px solid currentColor; border-radius: 4px; padding: 1px 6px; margin-top: 10px; }
+.grid { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 28px; margin-top: 24px; align-items: start; }
+@media (max-width: 820px) { .grid { grid-template-columns: minmax(0,1fr); } }
+
+.pilier { border-top: 1px solid var(--line); padding-block: 18px; display: grid; gap: 12px; }
+.pilier h2 { margin: 0; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 500; }
+fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+legend { font-weight: 500; margin-bottom: 8px; padding: 0; }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt { position: relative; }
+.opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.opt span { display: block; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); cursor: pointer; transition: border-color .15s, background .15s; }
+.opt input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); font-weight: 500; }
+.opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opt:hover span { border-color: var(--accent); }
+
+aside { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+aside h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-variant-numeric: tabular-nums; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: var(--mono); text-align: right; }
+.score { font-family: var(--mono); font-size: 1.8rem; color: var(--accent); line-height: 1; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+  font-family: var(--mono); font-size: 12px; overflow-x: auto; max-height: 220px; }
+button { font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--surface); cursor: pointer; font-weight: 500; }
+button.ghost { background: transparent; color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+details { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; }
+summary { cursor: pointer; color: var(--muted); }
+details pre { max-height: 420px; margin-top: 10px; }
+.err { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Questionnaire d'adéquation – assurance-vie</h1>
+    <p>Formulaire généré automatiquement depuis le fichier YAML. Chaque réponse alimente le profil et les contraintes de gestion à droite.</p>
+    <span class="tag">Réponses d'exemple – profil fictif</span>
+  </header>
+
+  <div class="grid">
+    <form id="form" novalidate></form>
+    <aside aria-live="polite">
+      <h2>Profil calculé</h2>
+      <div><div class="note">Score total</div><div class="score" id="score">–</div></div>
+      <dl id="contraintes"></dl>
+      <p class="note" id="regle"></p>
+      <pre id="json"></pre>
+      <div class="row">
+        <button type="button" id="copy">Copier le JSON</button>
+        <button type="button" class="ghost" id="reset">Effacer</button>
+      </div>
+    </aside>
+  </div>
+
+  <details>
+    <summary>Voir le YAML source</summary>
+    <pre id="yamlsrc"></pre>
+  </details>
+</div>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+<script>
+(function () {
+  fetch('questionnaire.yaml').then(r => { if (!r.ok) throw new Error('questionnaire.yaml introuvable'); return r.text(); }).then(init).catch(e => { document.getElementById('form').innerHTML = '<p class="err">' + e.message + '</p>'; });
+  function init(src) {
+  document.getElementById('yamlsrc').textContent = src;
+  const form = document.getElementById('form');
+  let q;
+  try { q = jsyaml.load(src); }
+  catch (e) { form.innerHTML = '<p class="err">YAML invalide : ' + e.message + '</p>'; return; }
+
+  const EXEMPLE = { Q1: 'occasionnellement', Q2: '10_30', Q3: '10', Q4: '3_8_ans', Q5: 'oui_art8' };
+  const LIB = { sri_max: 'SRI maximum (1 à 7)', part_uc_max: 'Part UC maximale', sfdr_min: 'SFDR minimum (article)' };
+
+  // Rendu du formulaire
+  q.piliers.forEach(p => {
+    const sec = document.createElement('section');
+    sec.className = 'pilier';
+    sec.innerHTML = '<h2>' + p.libelle + '</h2>';
+    p.questions.forEach(qu => {
+      const fs = document.createElement('fieldset');
+      fs.innerHTML = '<legend>' + qu.id + ' · ' + qu.texte + '</legend>';
+      const opts = document.createElement('div');
+      opts.className = 'opts';
+      qu.options.forEach((o, i) => {
+        const id = qu.id + '_' + i;
+        const v = String(o.valeur);
+        opts.insertAdjacentHTML('beforeend',
+          '<label class="opt" for="' + id + '"><input type="radio" id="' + id + '" name="' + qu.id +
+          '" value="' + v + '"' + (EXEMPLE[qu.id] === v ? ' checked' : '') + '><span>' +
+          (o.libelle || v) + '</span></label>');
+      });
+      fs.appendChild(opts);
+      sec.appendChild(fs);
+    });
+    form.appendChild(sec);
+  });
+
+  // Calcul du profil : contrainte la plus stricte
+  function calcul() {
+    const reponses = {}; let score = 0, nb = 0, total = 0;
+    const c = {};
+    q.piliers.forEach(p => p.questions.forEach(qu => {
+      total++;
+      const sel = form.querySelector('input[name="' + qu.id + '"]:checked');
+      if (!sel) return;
+      nb++;
+      const o = qu.options.find(x => String(x.valeur) === sel.value);
+      reponses[qu.id] = sel.value;
+      score += o.score || 0;
+      Object.entries(o.contrainte || {}).forEach(([k, v]) => {
+        if (k.endsWith('_max')) c[k] = k in c ? Math.min(c[k], v) : v;
+        else c[k] = k in c ? Math.max(c[k], v) : v;
+      });
+    }));
+    document.getElementById('score').textContent = nb ? score : '–';
+    const dl = document.getElementById('contraintes');
+    dl.innerHTML = '<dt>Réponses</dt><dd>' + nb + ' / ' + total + '</dd>';
+    Object.keys(LIB).forEach(k => {
+      let v = c[k];
+      if (v === undefined) v = '–';
+      else if (k === 'part_uc_max') v = Math.round(v * 100) + ' %';
+      dl.insertAdjacentHTML('beforeend', '<dt>' + LIB[k] + '</dt><dd>' + v + '</dd>');
+    });
+    document.getElementById('regle').textContent =
+      'Règle appliquée : ' + q.regle_profil.replace(/_/g, ' ') + ' (version ' + q.version + ').';
+    document.getElementById('json').textContent =
+      JSON.stringify({ version: q.version, reponses, score, contraintes: c }, null, 2);
+  }
+  form.addEventListener('change', calcul);
+  calcul();
+
+  document.getElementById('reset').addEventListener('click', () => {
+    form.querySelectorAll('input:checked').forEach(i => i.checked = false); calcul();
+  });
+  const copy = document.getElementById('copy');
+  copy.addEventListener('click', () => {
+    const txt = document.getElementById('json').textContent;
+    const ok = () => { copy.textContent = 'Copié'; setTimeout(() => copy.textContent = 'Copier le JSON', 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(ok).catch(sel); else sel();
+    function sel() { const r = document.createRange(); r.selectNodeContents(document.getElementById('json'));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  });
+}
+})();
+</script>
+</body>
+</html>
