@@ -17,4 +17,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install mstarpy
-      - run: python scripts/test_morningstar.py
+      - name: Test avec écran virtuel
+        run: xvfb-run -a python scripts/test_morningstar.py
+        env:
+          SELENIUM_CHROME_FLAGS: "--no-sandbox --disable-dev-shm-usage"
+      - name: Test en mode headless
+        if: always()
+        run: python scripts/test_morningstar.py
+        env:
+          SELENIUM_CHROME_FLAGS: "--headless=new --no-sandbox --disable-dev-shm-usage"
