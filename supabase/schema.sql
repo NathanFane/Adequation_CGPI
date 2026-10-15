@@ -14,7 +14,11 @@ create table contrats (
   id        bigint generated always as identity primary key,
   user_id   uuid not null references utilisateurs(id) on delete cascade,
   nom       text not null,
-  assureur  text
+  assureur  text,
+  frais_gestion_uc   numeric,   -- décimal : 0,0085 = 0,85 %
+  frais_gestion_euro numeric,
+  frais_versement    numeric,
+  frais_arbitrage    numeric
 );
 
 -- 3. Produits communs à tous les utilisateurs
@@ -35,6 +39,7 @@ create table produits (
 create table contrat_produits (
   contrat_id  bigint   not null references contrats(id) on delete cascade,
   isin        char(12) not null references produits(isin) on delete cascade,
+  frais_specifiques numeric,   -- remplace frais_gestion_uc du contrat pour ce support
   primary key (contrat_id, isin)
 );
 

@@ -25,8 +25,19 @@ def premier(valeur):
 # ---------- Accès aux données ----------
 
 def mes_contrats() -> pd.DataFrame:
-    rows = db.table("contrats").select("id, nom, assureur").eq("user_id", USER_ID).order("nom").execute().data
-    return pd.DataFrame(rows, columns=["id", "nom", "assureur"])
+    rows = (db.table("contrats").select("id, nom, assureur, frais_gestion_uc, frais_gestion_euro, "
+                                        "frais_versement, frais_arbitrage")
+            .eq("user_id", USER_ID).order("nom").execute().data)
+    return pd.DataFrame(rows, columns=["id", "nom", "assureur", "frais_gestion_uc", "frais_gestion_euro",
+                                       "frais_versement", "frais_arbitrage"])
+
+
+def en_pourcent(x):
+    return None if x is None or pd.isna(x) else round(float(x) * 100, 4)
+
+
+def en_decimal(x):
+    return None if x is None or pd.isna(x) else round(float(x) / 100, 6)
 
 
 def contrat_id(nom: str, assureur: str | None, contrats: pd.DataFrame) -> int:
@@ -171,7 +182,7 @@ with onglet_liste:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
     else:
         rows = (db.table("contrat_produits")
-                .select("contrat_id, isin, contrats(nom), produits(nom, type_produit, statut, derniere_vl, indice_reference, indice_manuel)")
+                .select("contrat_id, isin, frais_specifiques, contrats(nom), produits(nom, type_produit, statut, derniere_vl, indice_reference, indice_manuel)")
                 .in_("contrat_id", contrats["id"].tolist()).execute().data)
         df = pd.DataFrame([{
             "Retirer du contrat": False,
@@ -185,9 +196,40 @@ with onglet_liste:
                                     if r["produits"]["indice_manuel"] and r["produits"]["indice_reference"] in PAR_CODE
                                     else AUTO),
             "Indice retenu": PAR_CODE.get(r["produits"]["indice_reference"], {}).get("nom"),
+            "Frais spécifiques (%)": en_pourcent(r.get("frais_specifiques")),
             "contrat_id": r["contrat_id"],
         } for r in rows], columns=["Retirer du contrat", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au",
-                                   "Indice de référence", "Indice retenu", "contrat_id"])
+                                   "Indice de référence", "Indice retenu", "Frais spécifiques (%)", "contrat_id"])
+
+        # Frais des contrats
+        with st.expander("Frais de mes contrats"):
+            st.caption("En % par an pour les frais de gestion, en % du montant pour les versements et arbitrages. "
+                       "Un support facturé différemment se règle dans la colonne « Frais spécifiques » du tableau.")
+            frais = pd.DataFrame({
+                "id": contrats["id"], "Contrat": contrats["nom"], "Assureur": contrats["assureur"],
+                "Gestion UC (%)": contrats["frais_gestion_uc"].map(en_pourcent),
+                "Gestion fonds euros (%)": contrats["frais_gestion_euro"].map(en_pourcent),
+                "Versements (%)": contrats["frais_versement"].map(en_pourcent),
+                "Arbitrages (%)": contrats["frais_arbitrage"].map(en_pourcent),
+            })
+            frais_edites = st.data_editor(
+                frais, hide_index=True, width="stretch", disabled=["Contrat"],
+                column_config={"id": None, **{c: st.column_config.NumberColumn(min_value=0, max_value=20, format="%.2f")
+                                              for c in frais.columns if c.endswith("(%)")}},
+                key=f"frais_{st.session_state.get('version_frais', 0)}",
+            )
+            modifie = not frais_edites.fillna(-1).equals(frais.fillna(-1))
+            if st.button("Enregistrer les frais", disabled=not modifie):
+                for _, l in frais_edites.iterrows():
+                    db.table("contrats").update({
+                        "assureur": l["Assureur"] or None,
+                        "frais_gestion_uc": en_decimal(l["Gestion UC (%)"]),
+                        "frais_gestion_euro": en_decimal(l["Gestion fonds euros (%)"]),
+                        "frais_versement": en_decimal(l["Versements (%)"]),
+                        "frais_arbitrage": en_decimal(l["Arbitrages (%)"]),
+                    }).eq("id", int(l["id"])).eq("user_id", USER_ID).execute()
+                st.session_state["version_frais"] = st.session_state.get("version_frais", 0) + 1
+                st.rerun()
 
         # Récupération des VL (EODHD) pour les produits de l'utilisateur
         if st.button("Récupérer les données", help="Télécharge les VL manquantes de vos produits"):
@@ -248,6 +290,9 @@ with onglet_liste:
                         db.table("contrat_produits").upsert(l, on_conflict="contrat_id,isin").execute()
                     for isin, type_avant in precedent["types"]:
                         db.table("produits").update({"type_produit": type_avant}).eq("isin", isin).execute()
+                    for cid, isin, ancien in precedent.get("frais", []):
+                        (db.table("contrat_produits").update({"frais_specifiques": ancien})
+                         .eq("contrat_id", cid).eq("isin", isin).execute())
                     for isin, maj in precedent["indices"]:
                         db.table("produits").update(maj).eq("isin", isin).execute()
                     if precedent["indices"]:
@@ -257,7 +302,8 @@ with onglet_liste:
                     st.rerun()
 
             st.caption(f"{len(df)} produit(s) · {(df['Statut'] == 'introuvable').sum()} introuvable(s) · "
-                       "cochez « Retirer du contrat » ou modifiez le type ou l'indice, puis enregistrez.")
+                       "cochez « Retirer du contrat » ou modifiez le type, l'indice ou les frais spécifiques, "
+                       "puis enregistrez.")
             df = df.sort_values(["Contrat", "Nom"]).reset_index(drop=True)
             edite = st.data_editor(
                 df,
@@ -283,6 +329,9 @@ with onglet_liste:
                     "Indice de référence": st.column_config.SelectboxColumn(
                         options=NOMS_INDICES, width="medium",
                         help="Automatique : l'indice le plus corrélé au produit. Vous pouvez en imposer un."),
+                    "Frais spécifiques (%)": st.column_config.NumberColumn(
+                        min_value=0, max_value=20, format="%.2f",
+                        help="À remplir seulement si ce support est facturé différemment des autres UC du contrat"),
                     "Corrélation à l'indice": st.column_config.NumberColumn(
                         help="Corrélation des rendements hebdomadaires avec l'indice retenu", format="%.2f"),
                 },
@@ -292,11 +341,13 @@ with onglet_liste:
             types_modifies = edite[(edite["Type"] != df["Type"]) & edite["Type"].notna()][["ISIN", "Type"]].drop_duplicates()
             indices_modifies = edite[edite["Indice de référence"] != df["Indice de référence"]][
                 ["ISIN", "Indice de référence"]].drop_duplicates("ISIN")
-            nb = len(a_retirer) + len(types_modifies) + len(indices_modifies)
+            frais_modifies = edite[edite["Frais spécifiques (%)"].fillna(-1) != df["Frais spécifiques (%)"].fillna(-1)]
+            nb = len(a_retirer) + len(types_modifies) + len(indices_modifies) + len(frais_modifies)
             resume = ", ".join(x for x in [
                 f"{len(a_retirer)} retrait(s) du contrat" if len(a_retirer) else "",
                 f"{len(types_modifies)} type(s) modifié(s)" if len(types_modifies) else "",
                 f"{len(indices_modifies)} indice(s) modifié(s)" if len(indices_modifies) else "",
+                f"{len(frais_modifies)} frais modifié(s)" if len(frais_modifies) else "",
             ] if x)
 
             b1, b2, _ = st.columns([2, 2, 3])
@@ -314,7 +365,12 @@ with onglet_liste:
                     "retraits": [{"contrat_id": int(l["contrat_id"]), "isin": l["ISIN"]} for _, l in a_retirer.iterrows()],
                     "types": [(l["ISIN"], premier(avant.loc[l["ISIN"], "Type"])) for _, l in types_modifies.iterrows()],
                     "indices": [],
+                    "frais": [(int(l["contrat_id"]), l["ISIN"], en_decimal(df.loc[i, "Frais spécifiques (%)"]))
+                              for i, l in frais_modifies.iterrows()],
                 }
+                for _, l in frais_modifies.iterrows():
+                    (db.table("contrat_produits").update({"frais_specifiques": en_decimal(l["Frais spécifiques (%)"])})
+                     .eq("contrat_id", int(l["contrat_id"])).eq("isin", l["ISIN"]).execute())
                 for _, l in types_modifies.iterrows():
                     db.table("produits").update({"type_produit": l["Type"]}).eq("isin", l["ISIN"]).execute()
                 for _, l in indices_modifies.iterrows():
