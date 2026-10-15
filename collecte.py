@@ -60,7 +60,8 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
     Renvoie un compte rendu {"maj": [...], "sans_donnees": [...], "erreur": str | None}.
     """
     requete = (db.table("produits").select("isin, nom, type_produit, ticker_eodhd, derniere_vl")
-               .eq("statut", "valide").order("derniere_vl", desc=False, nullsfirst=True))
+               .eq("statut", "valide").is_("ticker_yahoo", "null")   # EODHD : secours de Yahoo
+               .order("derniere_vl", desc=False, nullsfirst=True))
     if isins is not None:
         requete = requete.in_("isin", isins)
     produits = requete.execute().data
@@ -97,7 +98,7 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
         for i in range(0, len(lignes), 500):
             db.table("historique").upsert(lignes[i:i + 500], on_conflict="isin,date").execute()
 
-        maj = {"ticker_eodhd": ticker}
+        maj = {"ticker_eodhd": ticker, "source_vl": "eodhd"}
         if lignes:
             maj["derniere_vl"] = max(l["date"] for l in lignes)
             rapport["maj"].append((p["isin"], len(lignes)))
@@ -105,6 +106,48 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
             rapport["sans_donnees"].append(p["isin"])
         db.table("produits").update(maj).eq("isin", p["isin"]).execute()
     return rapport
+
+
+def _tout(requete, taille=1000):
+    """Lit toutes les lignes d'une requête Supabase (pagination par 1000)."""
+    lignes, debut = [], 0
+    while True:
+        lot = requete.range(debut, debut + taille - 1).execute().data
+        lignes += lot
+        if len(lot) < taille:
+            return lignes
+        debut += taille
+
+
+def actualiser(db, cle: str, isins: list[str] | None = None, progression=None, anciennete_eodhd: int = 1) -> dict:
+    """Yahoo Finance d'abord (recherche du ticker si besoin), EODHD pour les produits absents de Yahoo."""
+    import yahoo
+
+    def requete(colonnes):
+        q = db.table("produits").select(colonnes).eq("statut", "valide")
+        return q.in_("isin", isins) if isins is not None else q
+
+    # 1. Recherche des tickers Yahoo jamais cherchés
+    a_chercher = _tout(requete("isin, nom").is_("ticker_yahoo", "null").eq("absent_yahoo", False))
+    for n, p in enumerate(a_chercher, 1):
+        if progression:
+            progression(n / max(len(a_chercher), 1), f"Recherche Yahoo : {p['nom'] or p['isin']}")
+        t = yahoo.chercher(p["isin"])
+        db.table("produits").update({"ticker_yahoo": t} if t else {"absent_yahoo": True}).eq("isin", p["isin"]).execute()
+
+    # 2. VL Yahoo
+    produits = _tout(requete("isin, ticker_yahoo, derniere_vl, source_vl").not_.is_("ticker_yahoo", "null"))
+    ry = yahoo.mettre_a_jour(db, produits, progression)
+    if ry["sans_donnees"]:   # ticker trouvé mais sans cours : retour à EODHD
+        db.table("produits").update({"ticker_yahoo": None, "absent_yahoo": True}).in_("isin", ry["sans_donnees"]).execute()
+
+    # 3. EODHD pour les autres (dans la limite du quota)
+    try:
+        re_ = mettre_a_jour(db, cle, isins, progression, anciennete_max=anciennete_eodhd)
+    except LimiteAtteinte as e:
+        re_ = {"maj": [], "sans_donnees": [], "erreur": str(e)}
+    return {"maj": ry["maj"] + re_["maj"], "sans_donnees": re_["sans_donnees"], "erreur": re_["erreur"],
+            "recharges": ry["recharges"]}
 
 
 def mettre_a_jour_indices(db) -> dict:

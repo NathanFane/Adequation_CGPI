@@ -1,12 +1,12 @@
 """Remplissage progressif du tableau à partir des listes de supports des assureurs.
 
-Chaque jour, une fois les produits existants rafraîchis, le reste du budget d'appels EODHD sert à
-ajouter de nouveaux supports, en commençant par ceux dont les données assureur sont les plus
-complètes. Un support n'est rattaché aux contrats de l'utilisateur que si ses VL ont été trouvées.
+Chaque jour, de nouveaux supports sont ajoutés (Yahoo Finance, EODHD en secours), en commençant
+par ceux dont les données assureur sont les plus complètes. Un support n'est rattaché aux contrats
+de l'utilisateur que si ses VL ont été trouvées.
 """
 from collections import Counter
 
-from collecte import LimiteAtteinte, mettre_a_jour
+from collecte import _tout, actualiser
 
 NOMS_CONTRATS = {
     "cardif_elite": "Cardif Elite",
@@ -16,16 +16,6 @@ NOMS_CONTRATS = {
 # Types sans VL quotidienne sur EODHD (SCPI, fonds à formule) : en dernier
 ORDRE_TYPES = {"fonds": 0, "etf": 1, "action": 2, "obligation": 3, "scpi": 4, "autre": 5}
 
-
-def _tout(requete, taille=1000):
-    """Lit toutes les lignes d'une requête Supabase (pagination par 1000)."""
-    lignes, debut = [], 0
-    while True:
-        lot = requete.range(debut, debut + taille - 1).execute().data
-        lignes += lot
-        if len(lot) < taille:
-            return lignes
-        debut += taille
 
 
 def _completude(s):
@@ -68,16 +58,16 @@ def rattacher(db, user_id, supports, isins):
     return len(lignes)
 
 
-def ajouter_nouveaux(db, cle, user_id, journal=print) -> dict:
-    """Ajoute des supports tant que le budget d'appels EODHD le permet."""
+def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1500, journal=print) -> dict:
+    """Ajoute jusqu'à `nombre` nouveaux supports (Yahoo, puis EODHD dans la limite du quota).
+
+    `max_produits` plafonne le nombre de produits suivis (stockage de la base gratuite Supabase).
+    """
     supports = _tout(db.table("supports_contrat_actuels").select(
         "contrat, assureur, isin, nom, type_produit, sri, sfdr, frais_actif, retrocessions, frais_contrat, "
         "ouvert, avenant_requis"))
     produits = {p["isin"]: p for p in _tout(db.table("produits").select("isin, statut, derniere_vl"))}
-
-    # Produits déjà suivis présents dans une liste : rattachement gratuit (aucun appel)
-    deja = {i for i, p in produits.items() if p["statut"] == "valide" and p["derniere_vl"]}
-    rattacher(db, user_id, supports, deja & {s["isin"] for s in supports})
+    suivis = sum(p["statut"] == "valide" for p in produits.values())
 
     # Candidats : supports ouverts, sans avenant, jamais essayés ; un ISIN = meilleure ligne
     par_isin = {}
@@ -88,27 +78,26 @@ def ajouter_nouveaux(db, cle, user_id, journal=print) -> dict:
         if s["isin"] not in par_isin or cle_tri < par_isin[s["isin"]][0]:
             par_isin[s["isin"]] = (cle_tri, s)
     nb_contrats = Counter(s["isin"] for s in supports)
-    candidats = sorted(par_isin.values(), key=lambda x: (x[0], -nb_contrats[x[1]["isin"]]))
+    candidats = [s for _, s in sorted(par_isin.values(), key=lambda x: (x[0], -nb_contrats[x[1]["isin"]]))]
+    lot = candidats[:max(0, min(nombre, max_produits - suivis))]
 
-    rapport = {"ajoutes": [], "introuvables": [], "restants": len(candidats), "erreur": None}
-    for _, s in candidats:
-        db.table("produits").upsert({"isin": s["isin"], "nom": s["nom"], "type_produit": s["type_produit"],
-                                     "statut": "valide"}, on_conflict="isin").execute()
-        try:
-            r = mettre_a_jour(db, cle, isins=[s["isin"]])
-        except LimiteAtteinte as e:
-            r = {"maj": [], "sans_donnees": [], "erreur": str(e)}
-        if r["erreur"]:
-            # Budget épuisé avant d'avoir les VL : le produit sera repris en priorité demain
-            rapport["erreur"] = r["erreur"]
-            break
-        rapport["restants"] -= 1
-        if r["maj"]:
-            rattacher(db, user_id, supports, {s["isin"]})
-            rapport["ajoutes"].append(s["isin"])
-            journal(f"Ajouté : {s['isin']} {s['nom']} ({r['maj'][0][1]} VL)")
-        else:
-            db.table("produits").update({"statut": "introuvable"}).eq("isin", s["isin"]).execute()
-            rapport["introuvables"].append(s["isin"])
-            journal(f"Introuvable sur EODHD : {s['isin']} {s['nom']}")
+    rapport = {"ajoutes": [], "en_attente": [], "restants": len(candidats) - len(lot), "erreur": None,
+               "plafond_atteint": suivis + len(lot) >= max_produits}
+    if lot:
+        db.table("produits").upsert([{"isin": s["isin"], "nom": s["nom"], "type_produit": s["type_produit"],
+                                      "statut": "valide"} for s in lot], on_conflict="isin").execute()
+        r = actualiser(db, cle, [s["isin"] for s in lot])
+        rapport["erreur"] = r["erreur"]
+        trouves = {i for i, _ in r["maj"]}
+        rapport["ajoutes"] = sorted(trouves)
+        # Sans VL : seront retentés via EODHD les jours suivants, ou marqués introuvables
+        rapport["en_attente"] = [s["isin"] for s in lot if s["isin"] not in trouves]
+
+    # Rattachement aux contrats de tous les produits suivis ayant des VL (aucun appel externe)
+    avec_vl = {p["isin"] for p in _tout(db.table("produits").select("isin").eq("statut", "valide")
+                                        .not_.is_("derniere_vl", "null"))}
+    rattacher(db, user_id, supports, avec_vl & {s["isin"] for s in supports})
+    journal(f"Nouveaux supports : {len(rapport['ajoutes'])} avec VL, {len(rapport['en_attente'])} en attente, "
+            f"{rapport['restants']} restant(s) dans les listes"
+            + (f" ; plafond de {max_produits} produits atteint" if rapport["plafond_atteint"] else ""))
     return rapport

@@ -1,7 +1,7 @@
 """Tâche quotidienne (GitHub Actions).
 
-1. Rafraîchit les VL des produits dont la dernière VL a plus de 30 jours (les plus anciennes d'abord).
-2. Avec le reste du budget EODHD, ajoute de nouveaux supports issus des listes des assureurs.
+1. Met à jour les VL : Yahoo Finance chaque jour ; EODHD (secours, 20 appels/jour) tous les 30 jours.
+2. Ajoute de nouveaux supports issus des listes des assureurs (300 par jour, plafond 1 500 produits).
 3. Met à jour les indices de référence (yfinance) et recalcule les métriques.
 """
 import os
@@ -23,10 +23,11 @@ collecte.QUOTA = int(os.environ.get("QUOTA_EODHD") or 20)
 # Utilisateur de test (en attendant la page de connexion) : secret DEV_USER_ID, sinon le seul profil existant
 user_id = os.environ.get("DEV_USER_ID") or db.table("utilisateurs").select("id").limit(1).execute().data[0]["id"]
 
-# 1. Rafraîchissement mensuel
-rapport = collecte.mettre_a_jour(db, cle, anciennete_max=RAFRAICHISSEMENT_JOURS)
-for isin, n in rapport["maj"]:
-    print(f"{isin} : {n} VL ajoutée(s)")
+# 1. Mise à jour des produits suivis
+rapport = collecte.actualiser(db, cle, anciennete_eodhd=RAFRAICHISSEMENT_JOURS)
+print(f"VL mises à jour : {len(rapport['maj'])} produit(s), {sum(n for _, n in rapport['maj'])} VL")
+if rapport["recharges"]:
+    print("Séries rechargées (dividende détaché) :", ", ".join(rapport["recharges"]))
 if rapport["sans_donnees"]:
     print("Sans données :", ", ".join(rapport["sans_donnees"]))
     jamais = [p["isin"] for p in db.table("produits").select("isin, derniere_vl")
@@ -34,11 +35,9 @@ if rapport["sans_donnees"]:
     if jamais:  # jamais trouvés : on arrête de les redemander chaque jour
         db.table("produits").update({"statut": "introuvable"}).in_("isin", jamais).execute()
 
-# 2. Nouveaux supports avec le budget restant
-if not rapport["erreur"]:
-    n = ajouter_nouveaux(db, cle, user_id)
-    print(f"Nouveaux supports : {len(n['ajoutes'])} ajouté(s), {len(n['introuvables'])} introuvable(s), "
-          f"{n['restants']} restant(s) à traiter")
+# 2. Nouveaux supports
+ajouter_nouveaux(db, cle, user_id, nombre=int(os.environ.get("NOUVEAUX_PAR_JOUR") or 300),
+                 max_produits=int(os.environ.get("MAX_PRODUITS") or 1500))
 print(f"Appels EODHD utilisés : {collecte.APPELS}/{collecte.QUOTA}")
 
 # 3. Indices de référence (yfinance, indépendant du quota EODHD)

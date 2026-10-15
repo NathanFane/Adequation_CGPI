@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from calculs import calculer_et_enregistrer
-from collecte import mettre_a_jour
+from collecte import actualiser
 from base import USER_ID, db
 from isin import est_valide, extraire, normaliser
 from indices import PAR_CODE, REFERENCES
@@ -231,10 +231,10 @@ with onglet_liste:
                 st.session_state["version_frais"] = st.session_state.get("version_frais", 0) + 1
                 st.rerun()
 
-        # Récupération des VL (EODHD) pour les produits de l'utilisateur
+        # Récupération des VL (Yahoo Finance, EODHD en secours) pour les produits de l'utilisateur
         if st.button("Récupérer les données", help="Télécharge les VL manquantes de vos produits"):
             barre = st.progress(0.0, text="Démarrage…")
-            rapport = mettre_a_jour(db, st.secrets["EODHD_API_KEY"], df["ISIN"].unique().tolist(),
+            rapport = actualiser(db, st.secrets["EODHD_API_KEY"], df["ISIN"].unique().tolist(),
                                     progression=lambda x, nom: barre.progress(x, text=nom))
             barre.progress(1.0, text="Calcul des métriques…")
             rapport["metriques"] = calculer_et_enregistrer(db, df["ISIN"].unique().tolist())
