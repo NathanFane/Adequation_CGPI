@@ -12,6 +12,19 @@ PROFONDEUR_ANS = 5
 CHEVAUCHEMENT_JOURS = 10   # VL déjà connues retéléchargées pour vérifier la continuité
 ECART_MAX = 0.005          # au-delà de 0,5 % d'écart sur les VL ajustées : rechargement complet
 LOT = 100                  # tickers par téléchargement groupé
+ECART_ABERRANT = 0.3       # point isolé à plus de 30 % de la médiane de ses voisins : erreur de données
+
+
+def nettoyer(d: pd.DataFrame) -> pd.DataFrame:
+    """Supprime les VL aberrantes isolées (ex. VL multipliée par 100 un seul jour).
+
+    On compare chaque VL à la médiane des 5 jours qui l'entourent : une vraie chute de marché
+    dure plusieurs jours et se retrouve dans la médiane, une erreur ponctuelle non.
+    """
+    if len(d) < 5:
+        return d
+    mediane = d["Close"].rolling(5, center=True, min_periods=3).median()
+    return d[(d["Close"] / mediane - 1).abs() <= ECART_ABERRANT]
 
 
 def chercher(isin: str) -> str | None:
@@ -37,6 +50,7 @@ def _telecharger(tickers: list[str], debut: dt.date) -> dict[str, pd.DataFrame]:
             d = d[["Close", "Adj Close"]].dropna(subset=["Close"])
         except KeyError:
             continue
+        d = nettoyer(d)
         if not d.empty:
             resultat[t] = d
     return resultat

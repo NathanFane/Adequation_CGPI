@@ -132,7 +132,7 @@ def lire_fichier(fichier) -> pd.DataFrame:
 
 st.title("Mes produits")
 
-onglet_import, onglet_liste = st.tabs(["1. Importer", "2. Visualiser"])
+onglet_liste, onglet_import = st.tabs(["1. Visualiser", "2. Importer"])
 
 with onglet_import:
     contrats = mes_contrats()
@@ -182,7 +182,7 @@ with onglet_import:
 with onglet_liste:
     contrats = mes_contrats()
     if contrats.empty:
-        st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
+        st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 2.")
     else:
         rows = _tout(db.table("contrat_produits")
                      .select("contrat_id, isin, frais_specifiques, contrats(nom), produits(nom, type_produit, "
@@ -411,4 +411,5 @@ with onglet_liste:
 
 # ---------- Pied de page ----------
 st.divider()
+st.page_link("univers.py", label="Univers d'investissement : tous les produits référencés", icon="🗂️")
 st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")
