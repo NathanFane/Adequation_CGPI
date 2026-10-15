@@ -189,10 +189,14 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
     L'indice de référence de chaque produit est celui qui lui est le plus corrélé, sauf s'il a été
     choisi à la main par un CGPI.
     """
-    requete = db.table("produits").select("isin, indice_reference, indice_manuel").eq("statut", "valide")
+    from collecte import _tout
+    from indices import SEUIL_ZONE, classe_indice, zone_indice
+
+    requete = (db.table("produits").select("isin, indice_reference, indice_manuel, classe_actifs, classe_source, zone")
+               .eq("statut", "valide"))
     if isins is not None:
         requete = requete.in_("isin", isins)
-    produits = requete.execute().data
+    produits = _tout(requete)
 
     depuis = dt.date.today() - dt.timedelta(days=365 * annees)
     rf = taux_sans_risque(depuis)
@@ -207,12 +211,26 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
             continue
         corr = correlations(vl, refs)
         indice = p["indice_reference"] if p["indice_manuel"] else (corr.index[0] if len(corr) else None)
+        rho = float(corr[indice]) if indice in corr.index else None
+        # Zone (et classe, si l'assureur ne la donne pas) déduites de l'indice : seulement si la
+        # corrélation est assez forte, ou si l'indice a été choisi à la main par le CGPI
+        fiable = p["indice_manuel"] or (rho is not None and rho >= SEUIL_ZONE)
+        maj = {}
         if not p["indice_manuel"] and indice != p["indice_reference"]:
-            db.table("produits").update({"indice_reference": indice}).eq("isin", p["isin"]).execute()
+            maj["indice_reference"] = indice
+        zone = zone_indice(indice) if fiable else "Indéterminée"
+        if zone != p["zone"]:
+            maj["zone"] = zone
+        if p["classe_source"] != "assureur":
+            classe = classe_indice(indice) if fiable else None
+            if classe != p["classe_actifs"]:
+                maj.update({"classe_actifs": classe, "classe_source": "indice" if classe else None})
+        if maj:
+            db.table("produits").update(maj).eq("isin", p["isin"]).execute()
         m["indice_reference"] = indice
-        m["correlation_indice"] = round(float(corr[indice]), 4) if indice in corr.index else None
+        m["correlation_indice"] = round(rho, 4) if rho is not None else None
         lignes.append({"isin": p["isin"], "date_calcul": dt.date.today().isoformat(), **m})
         rapport["calcules"].append(p["isin"])
-    if lignes:
-        db.table("metriques").upsert(lignes, on_conflict="isin,date_calcul").execute()
+    for i in range(0, len(lignes), 500):
+        db.table("metriques").upsert(lignes[i:i + 500], on_conflict="isin,date_calcul").execute()
     return rapport

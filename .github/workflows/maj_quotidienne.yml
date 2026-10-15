@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install supabase requests pandas numpy yfinance
+      - run: pip install supabase requests pandas numpy yfinance openpyxl
       - run: python scripts/maj_quotidienne.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

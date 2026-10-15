@@ -74,3 +74,38 @@ TICKERS = sorted({t for r in REFERENCES for t in r["composition"]})
 
 def nom(code: str | None) -> str:
     return PAR_CODE[code]["nom"] if code in PAR_CODE else "—"
+
+
+# ---------------------------------------------------------------- Classe d'actifs et zone
+CLASSES = ["monetaire", "obligations", "actions", "mixte", "immobilier", "matieres_premieres",
+           "alternatif", "structure"]
+ZONES = ["Monde", "Europe", "Zone euro", "France", "Royaume-Uni", "Suisse", "États-Unis", "Japon",
+         "Émergents", "Asie émergente", "Chine", "Inde", "Indéterminée"]
+SEUIL_ZONE = 0.7   # corrélation minimale à l'indice pour en déduire la zone (et la classe)
+
+_CLASSE_PAR_CATEGORIE = {"Actions": "actions", "Actions – secteur": "actions", "Actions – style": "actions",
+                         "Obligations": "obligations", "Monétaire": "monetaire", "Mixte": "mixte",
+                         "Immobilier coté": "immobilier", "Matières premières": "matieres_premieres"}
+_ZONE_PAR_CODE = {
+    "act_usa": "États-Unis", "act_usa_tech": "États-Unis", "act_usa_small": "États-Unis",
+    "act_europe": "Europe", "act_europe_600": "Europe", "act_europe_small": "Europe",
+    "sect_banques_europe": "Europe", "immo_europe": "Europe",
+    "act_zone_euro": "Zone euro", "act_zone_euro_small": "Zone euro", "monetaire_euro": "Zone euro",
+    "act_france": "France", "act_royaume_uni": "Royaume-Uni", "act_suisse": "Suisse", "act_japon": "Japon",
+    "act_emergents": "Émergents", "obl_emergents": "Émergents", "act_asie_emergente": "Asie émergente",
+    "act_chine": "Chine", "act_inde": "Inde", "obl_usa_couvert": "États-Unis",
+    "obl_monde_couvert": "Monde", "obl_convertibles": "Monde",
+}
+
+
+def classe_indice(code: str | None) -> str | None:
+    return _CLASSE_PAR_CATEGORIE.get(PAR_CODE[code]["categorie"]) if code in PAR_CODE else None
+
+
+def zone_indice(code: str | None) -> str | None:
+    """Zone d'un indice : table explicite, sinon obligations euro -> Zone euro, le reste -> Monde."""
+    if code not in PAR_CODE:
+        return None
+    if code in _ZONE_PAR_CODE:
+        return _ZONE_PAR_CODE[code]
+    return "Zone euro" if code.startswith("obl_") else "Monde"

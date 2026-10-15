@@ -7,7 +7,7 @@ import streamlit as st
 from base import USER_ID, db
 from calculs import (JOURS, MIN_POINTS, MIN_SEMAINES, correlations, detail, lire_historique, lire_indices,
                      rendements_references, taux_sans_risque)
-from indices import PAR_CODE, REFERENCES
+from indices import PAR_CODE, REFERENCES, SEUIL_ZONE
 
 
 def pct(x, d=2):
@@ -34,13 +34,16 @@ st.caption("Comment sont calculées les métriques affichées dans « Mes produi
 # ---------- 1. Données ----------
 st.header("1. Données utilisées")
 st.markdown(f"""
-- **VL quotidiennes** fournies par EODHD (End Of Day Historical Data), identifiées par ISIN.
+- **VL quotidiennes** fournies par Yahoo Finance (données Morningstar pour les fonds), identifiées par ISIN ;
+  à défaut par EODHD (End Of Day Historical Data).
 - **VL ajustées** des dividendes : un fonds de distribution n'apparaît pas en baisse le jour du détachement.
-- **Période** : les 5 dernières années disponibles (1 an avec l'offre gratuite d'EODHD).
+- **Période** : les 5 dernières années disponibles (1 an pour les produits suivis via l'offre gratuite d'EODHD).
 - **Minimum** : {MIN_POINTS} VL, soit environ 6 mois. En dessous, aucune métrique n'est calculée.
 - **{JOURS} jours de bourse** par an pour annualiser.
 - **Taux sans risque** : moyenne de l'€STR (Euro Short-Term Rate) publié par la BCE sur la même période.
-- **Mise à jour** : chaque matin du mardi au samedi, et à chaque clic sur « Récupérer les données ».
+- **Mise à jour** : chaque matin (Yahoo Finance) ; tous les 30 jours pour les produits suivis via EODHD ;
+  et à chaque clic sur « Récupérer les données ».
+- **Listes de supports des assureurs** (Cardif, Generali, Vie Plus) : SRI, frais, SFDR, classification.
 """)
 
 # ---------- 2. Formules ----------
@@ -104,6 +107,15 @@ st.markdown(f"""
   Le CGPI peut en imposer un autre dans le tableau.
 - Chaque indice est représenté par un ETF (cours dividendes réinvestis, source Yahoo Finance) ;
   les indices mixtes combinent plusieurs ETF, rééquilibrés chaque semaine.
+""")
+st.subheader("Classe d'actifs et zone géographique")
+st.markdown(f"""
+- **Classe d'actifs** (monétaire, obligations, actions, mixte, immobilier, matières premières, alternatif,
+  structuré) : d'après la classification de l'assureur ; à défaut, d'après la catégorie de l'indice le plus corrélé.
+- **Zone** : celle de l'indice le plus corrélé (ex. MSCI Japan → Japon, obligations d'État euro → Zone euro).
+- Si cette corrélation est inférieure à **{SEUIL_ZONE:.1f}**, la zone est « Indéterminée » plutôt que fausse.
+- C'est une **zone dominante**, pas une répartition en pourcentage : un fonds flexible ou international
+  peut ressembler davantage à un indice monde qu'à sa zone réelle.
 """)
 with st.expander(f"Liste des {len(REFERENCES)} indices de référence"):
     st.dataframe(pd.DataFrame([{
@@ -217,6 +229,9 @@ st.markdown("""
 - **Sharpe et Sortino** dépendent de la période : un même fonds peut changer de classement d'une année à l'autre.
 - **Cornish-Fisher** reste une approximation : elle devient instable pour des distributions très asymétriques.
 - **CVaR quotidienne** : elle mesure un risque sur un jour, à ne pas comparer directement à la VaR sur un an.
+- **Données Yahoo Finance** : source non officielle ; certains jours de VL manquent, le rendement suivant couvre
+  alors deux jours, ce qui peut légèrement fausser la volatilité et la VaR.
+- **Listes des assureurs** datées (juillet et novembre 2025) : SRI et frais ont pu évoluer depuis.
 - **Indices de référence** : ce sont des approximations par ETF ; l'indice officiel du prospectus peut différer.
   Les indices Royaume-Uni et Suisse sont en devise locale.
 """)

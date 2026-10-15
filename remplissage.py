@@ -7,6 +7,7 @@ de l'utilisateur que si ses VL ont été trouvées.
 from collections import Counter
 
 from collecte import _tout, actualiser
+from listes_assureurs import classe_assureur
 
 NOMS_CONTRATS = {
     "cardif_elite": "Cardif Elite",
@@ -58,27 +59,67 @@ def rattacher(db, user_id, supports, isins):
     return len(lignes)
 
 
-def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1500, journal=print) -> dict:
+def classer(db, supports):
+    """Classe d'actifs des produits suivis d'après les assureurs (prioritaire sur celle déduite de l'indice)."""
+    votes = {}
+    for s in supports:
+        c = classe_assureur(s.get("classification"), s.get("type_produit"))
+        if c:
+            votes.setdefault(s["isin"], Counter())[c] += 1
+    produits = _tout(db.table("produits").select("isin, classe_actifs, classe_source"))
+    par_classe = {}
+    for p in produits:
+        if p["isin"] in votes:
+            c = votes[p["isin"]].most_common(1)[0][0]
+            if (p["classe_actifs"], p["classe_source"]) != (c, "assureur"):
+                par_classe.setdefault(c, []).append(p["isin"])
+    for c, isins in par_classe.items():
+        for i in range(0, len(isins), 200):
+            db.table("produits").update({"classe_actifs": c, "classe_source": "assureur"}) \
+                .in_("isin", isins[i:i + 200]).execute()
+
+
+def _repartir(candidats, nb_contrats):
+    """Ordre d'import équilibré : tour à tour chaque (contrat, classe d'actifs, fonds/action),
+    et dans chaque groupe les supports aux données les plus complètes d'abord."""
+    groupes = {}
+    for s in candidats:
+        cle = (s["contrat"], classe_assureur(s.get("classification"), s["type_produit"]) or "inconnue",
+               s["type_produit"] == "action")
+        groupes.setdefault(cle, []).append(s)
+    for g in groupes.values():
+        g.sort(key=lambda s: (-_completude(s), ORDRE_TYPES.get(s["type_produit"], 9), -nb_contrats[s["isin"]]))
+    ordre, rang = [], 0
+    while len(ordre) < len(candidats):
+        for cle in sorted(groupes):
+            if rang < len(groupes[cle]):
+                ordre.append(groupes[cle][rang])
+        rang += 1
+    return ordre
+
+
+def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1000, journal=print) -> dict:
     """Ajoute jusqu'à `nombre` nouveaux supports (Yahoo, puis EODHD dans la limite du quota).
 
     `max_produits` plafonne le nombre de produits suivis (stockage de la base gratuite Supabase).
     """
     supports = _tout(db.table("supports_contrat_actuels").select(
-        "contrat, assureur, isin, nom, type_produit, sri, sfdr, frais_actif, retrocessions, frais_contrat, "
-        "ouvert, avenant_requis"))
+        "contrat, assureur, isin, nom, type_produit, classification, sri, sfdr, frais_actif, retrocessions, "
+        "frais_contrat, ouvert, avenant_requis"))
     produits = {p["isin"]: p for p in _tout(db.table("produits").select("isin, statut, derniere_vl"))}
     suivis = sum(p["statut"] == "valide" for p in produits.values())
 
-    # Candidats : supports ouverts, sans avenant, jamais essayés ; un ISIN = meilleure ligne
+    # Candidats : supports ouverts, sans avenant, jamais essayés, avec des VL de marché
+    # (ni SCPI ni fonds à formule) ; un ISIN = sa ligne la plus complète
     par_isin = {}
     for s in supports:
-        if s.get("ouvert") is False or s.get("avenant_requis") or s["isin"] in produits:
+        if (s.get("ouvert") is False or s.get("avenant_requis") or s["isin"] in produits
+                or s["type_produit"] in ("scpi", "autre")
+                or classe_assureur(s.get("classification"), s["type_produit"]) == "structure"):
             continue
-        cle_tri = (-_completude(s), ORDRE_TYPES.get(s["type_produit"], 9))
-        if s["isin"] not in par_isin or cle_tri < par_isin[s["isin"]][0]:
-            par_isin[s["isin"]] = (cle_tri, s)
-    nb_contrats = Counter(s["isin"] for s in supports)
-    candidats = [s for _, s in sorted(par_isin.values(), key=lambda x: (x[0], -nb_contrats[x[1]["isin"]]))]
+        if s["isin"] not in par_isin or _completude(s) > _completude(par_isin[s["isin"]]):
+            par_isin[s["isin"]] = s
+    candidats = _repartir(list(par_isin.values()), Counter(s["isin"] for s in supports))
     lot = candidats[:max(0, min(nombre, max_produits - suivis))]
 
     rapport = {"ajoutes": [], "en_attente": [], "restants": len(candidats) - len(lot), "erreur": None,
@@ -97,6 +138,7 @@ def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1500, journal=pr
     avec_vl = {p["isin"] for p in _tout(db.table("produits").select("isin").eq("statut", "valide")
                                         .not_.is_("derniere_vl", "null"))}
     rattacher(db, user_id, supports, avec_vl & {s["isin"] for s in supports})
+    classer(db, supports)
     journal(f"Nouveaux supports : {len(rapport['ajoutes'])} avec VL, {len(rapport['en_attente'])} en attente, "
             f"{rapport['restants']} restant(s) dans les listes"
             + (f" ; plafond de {max_produits} produits atteint" if rapport["plafond_atteint"] else ""))

@@ -5,13 +5,16 @@ import pandas as pd
 import streamlit as st
 
 from calculs import calculer_et_enregistrer
-from collecte import actualiser
+from collecte import _tout, actualiser
 from base import USER_ID, db
 from isin import est_valide, extraire, normaliser
-from indices import PAR_CODE, REFERENCES
+from indices import PAR_CODE, REFERENCES, ZONES
 from openfigi import TYPES, infos_produits
 
 AUTO = "Automatique (meilleure corrélation)"
+NOMS_CLASSES = {"monetaire": "Monétaire", "obligations": "Obligations", "actions": "Actions", "mixte": "Mixte",
+                "immobilier": "Immobilier", "matieres_premieres": "Matières premières",
+                "alternatif": "Alternatif", "structure": "Structuré / à formule"}
 NOMS_INDICES = [AUTO] + [r["nom"] for r in REFERENCES]
 CODE_PAR_NOM = {r["nom"]: r["code"] for r in REFERENCES}
 
@@ -181,14 +184,17 @@ with onglet_liste:
     if contrats.empty:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 1.")
     else:
-        rows = (db.table("contrat_produits")
-                .select("contrat_id, isin, frais_specifiques, contrats(nom), produits(nom, type_produit, statut, derniere_vl, indice_reference, indice_manuel)")
-                .in_("contrat_id", contrats["id"].tolist()).execute().data)
+        rows = _tout(db.table("contrat_produits")
+                     .select("contrat_id, isin, frais_specifiques, contrats(nom), produits(nom, type_produit, "
+                             "classe_actifs, zone, statut, derniere_vl, indice_reference, indice_manuel)")
+                     .in_("contrat_id", contrats["id"].tolist()).order("isin").order("contrat_id"))
         df = pd.DataFrame([{
             "Retirer du contrat": False,
             "ISIN": r["isin"],
             "Nom": r["produits"]["nom"] or "—",
             "Type": r["produits"]["type_produit"],
+            "Classe d'actifs": NOMS_CLASSES.get(r["produits"]["classe_actifs"]),
+            "Zone": r["produits"]["zone"],
             "Contrat": r["contrats"]["nom"],
             "Statut": r["produits"]["statut"],
             "VL jusqu'au": r["produits"]["derniere_vl"],
@@ -198,7 +204,8 @@ with onglet_liste:
             "Indice retenu": PAR_CODE.get(r["produits"]["indice_reference"], {}).get("nom"),
             "Frais spécifiques (%)": en_pourcent(r.get("frais_specifiques")),
             "contrat_id": r["contrat_id"],
-        } for r in rows], columns=["Retirer du contrat", "ISIN", "Nom", "Type", "Contrat", "Statut", "VL jusqu'au",
+        } for r in rows], columns=["Retirer du contrat", "ISIN", "Nom", "Type", "Classe d'actifs", "Zone", "Contrat",
+                                   "Statut", "VL jusqu'au",
                                    "Indice de référence", "Indice retenu", "Frais spécifiques (%)", "contrat_id"])
 
         # Frais des contrats
@@ -255,13 +262,12 @@ with onglet_liste:
                            if m["insuffisants"] else ""))
 
         # Dernières métriques de chaque produit
-        mets = (db.table("metriques").select("isin, date_calcul, rendement_annuel, volatilite, var_cf, cvar, "
-                                             "max_drawdown, recouvrement_jours, sharpe, sortino, correlation_indice")
-                .in_("isin", df["ISIN"].unique().tolist() or [""]).order("date_calcul", desc=True)
-                .execute().data)
-        dernieres = {}
-        for m in mets:
-            dernieres.setdefault(m["isin"], m)
+        mes_isins = set(df["ISIN"])
+        dernieres = {m["isin"]: m for m in _tout(
+            db.table("metriques_actuelles").select("isin, date_calcul, rendement_annuel, volatilite, var_cf, cvar, "
+                                                   "max_drawdown, recouvrement_jours, sharpe, sortino, "
+                                                   "correlation_indice").order("isin"))
+            if m["isin"] in mes_isins}
         COLONNES_METRIQUES = {
             "Rendement annuel": "rendement_annuel", "Volatilité": "volatilite", "VaR 97,5 % 1 an": "var_cf",
             "CVaR 1 jour": "cvar", "Max Drawdown": "max_drawdown", "Recouvrement (jours)": "recouvrement_jours",
@@ -270,13 +276,19 @@ with onglet_liste:
         for colonne, champ in COLONNES_METRIQUES.items():
             df[colonne] = df["ISIN"].map(lambda i, c=champ: (dernieres.get(i) or {}).get(c))
 
-        f1, f2 = st.columns(2)
+        f1, f2, f3, f4 = st.columns(4)
         filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
         filtre_type = f2.multiselect("Filtrer par type", TYPES)
+        filtre_classe = f3.multiselect("Filtrer par classe d'actifs", list(NOMS_CLASSES.values()))
+        filtre_zone = f4.multiselect("Filtrer par zone", ZONES)
         if filtre:
             df = df[df["Contrat"].isin(filtre)]
         if filtre_type:
             df = df[df["Type"].isin(filtre_type)]
+        if filtre_classe:
+            df = df[df["Classe d'actifs"].isin(filtre_classe)]
+        if filtre_zone:
+            df = df[df["Zone"].isin(filtre_zone)]
 
         if df.empty:
             st.info("Aucun produit.")
@@ -308,10 +320,14 @@ with onglet_liste:
             edite = st.data_editor(
                 df,
                 hide_index=True, width="stretch",
-                disabled=["ISIN", "Nom", "Contrat", "Statut", "VL jusqu'au", "Indice retenu",
+                disabled=["ISIN", "Nom", "Classe d'actifs", "Zone", "Contrat", "Statut", "VL jusqu'au", "Indice retenu",
                           *COLONNES_METRIQUES],
                 column_config={
                     "contrat_id": None,
+                    "Classe d'actifs": st.column_config.TextColumn(
+                        help="Selon la classification de l'assureur ; à défaut, selon l'indice le plus corrélé"),
+                    "Zone": st.column_config.TextColumn(
+                        help="Zone de l'indice le plus corrélé ; « Indéterminée » si la corrélation est inférieure à 0,7"),
                     "Type": st.column_config.SelectboxColumn("Type", options=TYPES),
                     "VaR 97,5 % 1 an": st.column_config.NumberColumn(
                         help="Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)",

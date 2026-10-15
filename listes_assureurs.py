@@ -329,3 +329,33 @@ def extraire(dossier_assureur: str, fichiers: list[str]):
                 continue
             retenues[cle] = l
     return list(retenues.values()), {"lignes": nb, "doublons": nb - len(retenues), "anomalies": anomalies}
+
+
+# ---------------------------------------------------------------- Classe d'actifs
+# Mots-clés recherchés dans la classification de l'assureur (Cardif, Generali EUROPERF,
+# catégorie Morningstar chez Vie Plus), dans cet ordre.
+_MOTS_CLASSES = [
+    ("structure", ("capital garanti", "capital protég", "capital protege", "fonds garantis", "garantie plancher", "fonds à horizon",
+                   "maturité définie", "obligations à échéance")),
+    ("monetaire", ("monétaire", "money market")),
+    ("immobilier", ("immobilier", "real estate")),
+    ("matieres_premieres", ("matières premières", "commodit")),
+    ("alternatif", ("spéculatif", "alternatif", "alt -", "macro", "multistrategy", "market neutral",
+                    "trading", "fcpr", "private equity")),
+    ("mixte", ("mixte", "diversifié", "allocation", "flexible", "gestion à horizons")),
+    ("obligations", ("obligation", "bond", "taux", "convertible", "crédit", "credit")),
+    ("actions", ("action", "equity", "actions")),
+]
+
+
+def classe_assureur(classification: str | None, type_produit: str | None = None) -> str | None:
+    """Classe d'actifs déduite de la classification de l'assureur (None si inconnue)."""
+    if type_produit == "action":
+        return "actions"
+    if type_produit == "scpi":
+        return "immobilier"
+    texte = (classification or "").lower()
+    for classe, mots in _MOTS_CLASSES:
+        if any(m in texte for m in mots):
+            return classe
+    return None
