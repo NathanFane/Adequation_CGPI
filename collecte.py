@@ -14,7 +14,16 @@ class LimiteAtteinte(Exception):
     """Quota de requêtes EODHD épuisé ou clé refusée."""
 
 
+# Budget d'appels de la tâche en cours (None = illimité). Compté avant chaque appel.
+QUOTA = None
+APPELS = 0
+
+
 def _get(chemin: str, cle: str, **params):
+    global APPELS
+    if QUOTA is not None and APPELS >= QUOTA:
+        raise LimiteAtteinte(f"budget de {QUOTA} appels EODHD atteint pour aujourd'hui")
+    APPELS += 1
     r = requests.get(f"{BASE}/{chemin}", params={"api_token": cle, "fmt": "json", **params}, timeout=30)
     if r.status_code in (401, 402, 403, 429):
         raise LimiteAtteinte(f"EODHD a refusé la requête ({r.status_code}) : {r.text[:120]}")
@@ -29,6 +38,11 @@ def trouver_ticker(isin: str, type_produit: str | None, cle: str) -> str | None:
     if type_produit in (None, "fonds", "autre"):
         if _get(f"eod/{isin}.EUFUND", cle, **{"from": (dt.date.today() - dt.timedelta(days=10)).isoformat()}):
             return f"{isin}.EUFUND"
+    return chercher_ticker(isin, cle)
+
+
+def chercher_ticker(isin: str, cle: str) -> str | None:
+    """Recherche EODHD par ISIN (ETF, actions, fonds absents de EUFUND)."""
     resultats = _get(f"search/{isin}", cle) or []
     if not resultats:
         return None
@@ -37,13 +51,16 @@ def trouver_ticker(isin: str, type_produit: str | None, cle: str) -> str | None:
     return f"{x['Code']}.{x['Exchange']}"
 
 
-def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None) -> dict:
+def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None,
+                  anciennete_max: int = 1) -> dict:
     """Met à jour l'historique des produits valides (tous, ou seulement `isins`).
 
-    Ne télécharge que les VL postérieures à la dernière date connue.
+    Ne télécharge que les VL postérieures à la dernière date connue, et seulement pour les
+    produits dont la dernière VL date de plus de `anciennete_max` jours (les plus anciennes d'abord).
     Renvoie un compte rendu {"maj": [...], "sans_donnees": [...], "erreur": str | None}.
     """
-    requete = db.table("produits").select("isin, nom, type_produit, ticker_eodhd, derniere_vl").eq("statut", "valide")
+    requete = (db.table("produits").select("isin, nom, type_produit, ticker_eodhd, derniere_vl")
+               .eq("statut", "valide").order("derniere_vl", desc=False, nullsfirst=True))
     if isins is not None:
         requete = requete.in_("isin", isins)
     produits = requete.execute().data
@@ -53,16 +70,23 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
     for n, p in enumerate(produits, 1):
         if progression:
             progression(n / max(len(produits), 1), p["nom"] or p["isin"])
-        if p["derniere_vl"] and p["derniere_vl"] >= (aujourd_hui - dt.timedelta(days=1)).isoformat():
-            continue  # déjà à jour
+        if p["derniere_vl"] and p["derniere_vl"] >= (aujourd_hui - dt.timedelta(days=anciennete_max)).isoformat():
+            continue  # assez récent
         try:
-            ticker = p["ticker_eodhd"] or trouver_ticker(p["isin"], p["type_produit"], cle)
+            debut = (dt.date.fromisoformat(p["derniere_vl"]) + dt.timedelta(days=1) if p["derniere_vl"]
+                     else aujourd_hui - dt.timedelta(days=365 * PROFONDEUR_ANS))
+            ticker, vl = p["ticker_eodhd"], None
+            if not ticker and p["type_produit"] in (None, "fonds", "autre"):
+                # Fonds : on demande directement l'historique complet (1 appel au lieu de 2)
+                vl = _get(f"eod/{p['isin']}.EUFUND", cle, **{"from": debut.isoformat()})
+                ticker = f"{p['isin']}.EUFUND" if vl else None
+            if not ticker:
+                ticker = chercher_ticker(p["isin"], cle)
             if not ticker:
                 rapport["sans_donnees"].append(p["isin"])
                 continue
-            debut = (dt.date.fromisoformat(p["derniere_vl"]) + dt.timedelta(days=1) if p["derniere_vl"]
-                     else aujourd_hui - dt.timedelta(days=365 * PROFONDEUR_ANS))
-            vl = _get(f"eod/{ticker}", cle, **{"from": debut.isoformat()}) or []
+            if vl is None:
+                vl = _get(f"eod/{ticker}", cle, **{"from": debut.isoformat()}) or []
         except LimiteAtteinte as e:
             rapport["erreur"] = str(e)
             break
