@@ -13,6 +13,8 @@ NIVEAUX_CONNAISSANCE = [("02010", "debutant"), ("02020", "informe"), ("02030", "
 NIVEAUX_PERTE = [("03010", "aucune"), ("03020", "limitee"), ("03040", "capital"), ("03050", "au_dela")]
 # Durée de détention exprimée en lettres dans certains fichiers (borne basse retenue)
 DUREES_CODEES = {"VS": 0.5, "S": 1, "M": 3, "L": 5}
+# Champ 00060 : type de produit
+CATEGORIES = {"U": "opcvm", "UM": "opcvm_monetaire", "N": "fia", "NM": "fia_monetaire", "ETC": "etc"}
 
 
 def lire_fichier(chemin: str) -> pd.DataFrame:
@@ -95,6 +97,12 @@ def convertir_ligne(l: pd.Series, anomalies: list) -> dict | None:
             v = None
         frais[champ] = v
 
+    code_type = _drapeau(g("00060"))
+    categorie = CATEGORIES.get(code_type) if code_type else None
+    if code_type and categorie is None:
+        alerte(f"type de produit non reconnu ({code_type}), classé « autre »")
+        categorie = "autre"
+
     date_ref = _texte(g("00050"))
     return {
         "isin": isin,
@@ -103,6 +111,7 @@ def convertir_ligne(l: pd.Series, anomalies: list) -> dict | None:
         "societe_gestion": _texte(g("00070")),
         "date_reference": str(pd.to_datetime(date_ref).date()) if date_ref else None,
         "version_emt": _texte(g("00001")),
+        "categorie_emt": categorie,
         "connaissance_min": connaissance,
         "perte_acceptable_min": perte,
         "perte_limitee_niveau": _nombre(g("03030")),
