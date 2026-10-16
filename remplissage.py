@@ -13,6 +13,8 @@ NOMS_CONTRATS = {
     "cardif_elite": "Cardif Elite",
     "generali_8301": "Generali 8301",
     "vieplus_patrimoine_vie_plus_multiprojet": "Patrimoine Vie Plus Multiprojet",
+    "generali_espace_lux": "Generali Espace Lux",
+    "cardif_panthea_vie_2": "Cardif Panthéa Vie 2",
 }
 # Types sans VL quotidienne sur EODHD (SCPI, fonds à formule) : en dernier
 ORDRE_TYPES = {"fonds": 0, "etf": 1, "action": 2, "obligation": 3, "scpi": 4, "autre": 5}
@@ -98,7 +100,7 @@ def _repartir(candidats, nb_contrats):
     return ordre
 
 
-def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2400, journal=print) -> dict:
+def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2800, journal=print) -> dict:
     """Ajoute jusqu'à `nombre` nouveaux supports (Yahoo, puis EODHD dans la limite du quota).
 
     `max_produits` plafonne le nombre de produits suivis (stockage de la base gratuite Supabase).

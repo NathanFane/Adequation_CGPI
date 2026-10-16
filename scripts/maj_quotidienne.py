@@ -1,7 +1,7 @@
 """Tâche quotidienne (GitHub Actions).
 
 1. Met à jour les VL : Yahoo Finance chaque jour ; EODHD (secours, 20 appels/jour) tous les 30 jours.
-2. Ajoute de nouveaux supports issus des listes des assureurs (fonds uniquement, 500 par jour, plafond 2 400).
+2. Ajoute de nouveaux supports issus des listes des assureurs (fonds uniquement, 500 par jour, plafond 2 800).
 3. Met à jour les indices de référence (yfinance) et recalcule les métriques.
 """
 import os
@@ -37,7 +37,7 @@ if rapport["sans_donnees"]:
 
 # 2. Nouveaux supports
 ajouter_nouveaux(db, cle, user_id, nombre=int(os.environ.get("NOUVEAUX_PAR_JOUR") or 500),
-                 max_produits=int(os.environ.get("MAX_PRODUITS") or 2400))
+                 max_produits=int(os.environ.get("MAX_PRODUITS") or 2800))
 print(f"Appels EODHD utilisés : {collecte.APPELS}/{collecte.QUOTA}")
 
 # 3. Indices de référence (yfinance, indépendant du quota EODHD)

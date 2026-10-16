@@ -306,7 +306,167 @@ def lire_cardif(chemin: str):
     return lignes, anomalies
 
 
-LECTEURS = {"generali": lire_generali, "vieplus": lire_vieplus, "cardif": lire_cardif}
+# ---------------------------------------------------------------- Listes en PDF (texte, pas des scans)
+# Méthode : les colonnes du tableau sont délimitées par des traits verticaux dans le PDF ; chaque
+# ligne de fonds est repérée par son ISIN, et chaque mot est rangé dans la colonne et la ligne
+# dont il est le plus proche (les noms coupés sur deux lignes sont ainsi recollés).
+_ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+def _bornes_colonnes(page, nb):
+    """Abscisses des traits verticaux du tableau (traits ou rectangles très fins)."""
+    xs = [l["x0"] for l in page.lines if abs(l["x0"] - l["x1"]) < 1 and l["bottom"] - l["top"] > 5]
+    xs += [r["x0"] for r in page.rects if r["width"] < 2 and r["height"] > 5]
+    bornes = []
+    for x in sorted(xs):
+        if not bornes or x - bornes[-1] > 3:
+            bornes.append(x)
+    return bornes if len(bornes) == nb + 1 else None
+
+
+def _date_liste_pdf(texte):
+    t = texte.lower().replace("é", "e").replace("û", "u")
+    m = re.search(r"(?:au|en date du)\s+(\d{1,2})(?:er)?[\s/]+([a-z]+|\d{2})[\s/]+(\d{4})", t)
+    if not m:
+        return date.today()
+    mois = int(m.group(2)) if m.group(2).isdigit() else MOIS.get(m.group(2))
+    return date(int(m.group(3)), mois, int(m.group(1))) if mois else date.today()
+
+
+def _lignes_pdf(chemin, nb_colonnes, titres_sections):
+    """[(section, [texte de chaque colonne])] pour chaque ligne de fonds du PDF."""
+    import pdfplumber
+
+    resultat, section, date_liste, ignorees = [], None, None, 0
+    with pdfplumber.open(chemin) as pdf:
+        for page in pdf.pages:
+            mots = page.extract_words()
+            if date_liste is None:
+                date_liste = _date_liste_pdf(" ".join(m["text"] for m in mots))
+            # Pied de page (« Octobre 2025 … 11/35 ») : tout ce qui est à hauteur du numéro de page
+            pieds = [m["top"] for m in mots if re.match(r"^\d+/\d+$", m["text"]) and m["top"] > page.height - 60]
+            if pieds:
+                mots = [m for m in mots if m["top"] < min(pieds) - 6]
+            bornes = _bornes_colonnes(page, nb_colonnes)
+            # Lignes de texte (mots à la même hauteur)
+            lignes = {}
+            for m in mots:
+                lignes.setdefault(round(m["top"]), []).append(m)
+            titres = {}   # hauteur -> titre de section
+            for y, l in lignes.items():
+                l = sorted(l, key=lambda m: m["x0"])
+                if bornes and l[0]["x0"] > bornes[1]:
+                    continue   # un titre de section commence dans la première colonne
+                t = " ".join(m["text"] for m in l).strip()
+                for titre in titres_sections:
+                    if t.startswith(titre) and len(t) < len(titre) + 8:
+                        titres[y] = titre
+            ancres = sorted(m["top"] for m in mots if _ISIN.match(m["text"]))
+            if not ancres:
+                continue
+            if bornes is None:
+                if len(ancres) > 3:   # vrai tableau dont les colonnes n'ont pas été reconnues
+                    ignorees += len(ancres)
+                continue
+            exclus = {id(m) for y in titres for m in lignes[y]}
+            cellules = {a: [[] for _ in range(nb_colonnes)] for a in ancres}
+            for m in mots:
+                if id(m) in exclus:
+                    continue
+                a = min(ancres, key=lambda a: abs(a - m["top"]))
+                if abs(a - m["top"]) > 14:
+                    continue
+                xc = (m["x0"] + m["x1"]) / 2
+                for i in range(nb_colonnes):
+                    if bornes[i] <= xc < bornes[i + 1]:
+                        cellules[a][i].append(m)
+                        break
+            for a in ancres:
+                avant = [y for y in titres if y < a]
+                if avant:
+                    section = titres[max(avant)]
+                textes = [" ".join(m["text"] for m in sorted(c, key=lambda m: (round(m["top"]), m["x0"])))
+                          for c in cellules[a]]
+                resultat.append((section, textes))
+    return resultat, date_liste or date.today(), ignorees
+
+
+def _sri(v):
+    v = (_texte(v) or "").strip()
+    return int(v) if v in list("1234567") else None
+
+
+SECTIONS_PDF = ("Fonds actions", "Fonds obligations", "Fonds mixtes", "Fonds monétaires", "Fonds spéculatifs",
+                "Fonds immobiliers", "Autres Fonds", "Autres", "Allocation prudente", "Allocation équilibre",
+                "Allocation dynamique", "Titres vifs")
+
+
+def lire_generali_lux(chemin: str):
+    """Generali Espace Lux : Société | Fonds | Devise | ISIN | SRI | SFDR | Label | perf A (an, 5 ans) |
+    frais UC (dont rétro) | perf nette (an, 5 ans) | frais contrat | frais totaux (dont) | perf finale (an, 5 ans)."""
+    lignes, date_liste, ignorees = _lignes_pdf(chemin, 16, SECTIONS_PDF)
+    resultat, anomalies = [], [f"{ignorees} ISIN cités hors du tableau principal (annexes) : ignorés"] if ignorees else []
+    for section, c in lignes:
+        isin = normaliser(c[3])
+        if not est_valide(isin):
+            anomalies.append(f"ISIN invalide : {c[3]!r} ({c[1]})")
+            continue
+        frais, retro = _frais_dont(c[9])
+        frais_tot, _ = _frais_dont(c[13])
+        label = (c[6] or "").upper()
+        resultat.append({
+            "contrat": "generali_espace_lux", "assureur": "Generali Luxembourg", "isin": isin,
+            "date_liste": date_liste.isoformat(), "nom": c[1] or None,
+            "type_produit": "etf" if re.search(r"\bETF\b", c[1] or "") else "fonds",
+            "societe_gestion": c[0] or None, "classification": section,
+            "sri": _sri(c[4]), "sfdr": _sfdr(c[5]),
+            "label_isr": "ISR" in label, "label_greenfin": "GREENFIN" in label,
+            "frais_actif": frais, "retrocessions": retro, "frais_contrat": _valeur_cardif(c[12]),
+            "frais_totaux": frais_tot, "perf_brute_n1": _valeur_cardif(c[7]),
+            "perf_nette_n1": _valeur_cardif(c[10]), "perf_finale_n1": _valeur_cardif(c[14]), "ouvert": True,
+            "complements": {"devise": c[2] or None, "label": c[6] or None,
+                            "perf_brute_5ans_annualisee": _valeur_cardif(c[8]),
+                            "perf_nette_5ans_annualisee": _valeur_cardif(c[11]),
+                            "perf_finale_5ans_annualisee": _valeur_cardif(c[15])},
+        })
+    return resultat, anomalies
+
+
+def lire_cardif_pdf(chemin: str):
+    """Liste Cardif en PDF (ex. Panthéa Vie 2) : ISIN | Libellé | Forme | Société | SRI | perf brute (an, 5 ans) |
+    frais actif (dont rétro) | perf nette (an, 5 ans) | frais contrat | frais totaux (dont) | perf finale (an, 5 ans)."""
+    lignes, date_liste, ignorees = _lignes_pdf(chemin, 14, SECTIONS_PDF)
+    import pdfplumber
+    with pdfplumber.open(chemin) as pdf:
+        titre = " ".join((pdf.pages[0].extract_text() or "").split())
+    m = re.search(r"Liste des supports des contrats\s*:\s*(.*?)\s+(?:Fonds en euros|Taux)", titre)
+    noms = (m.group(1) if m else "cardif").split()
+    contrat = "cardif_" + re.sub(r"[^a-z0-9]+", "_", " ".join(noms[-3:]).lower()).strip("_")
+    resultat, anomalies = [], [f"{ignorees} ISIN cités hors du tableau principal (annexes) : ignorés"] if ignorees else []
+    for section, c in lignes:
+        isin = normaliser((c[0] or "").split(" ")[0])
+        if not est_valide(isin):
+            anomalies.append(f"ISIN invalide : {c[0]!r} ({c[1]})")
+            continue
+        frais, retro = _frais_dont(c[7])
+        frais_tot, _ = _frais_dont(c[11])
+        resultat.append({
+            "contrat": contrat, "assureur": "Cardif", "isin": isin, "date_liste": date_liste.isoformat(),
+            "nom": c[1] or None, "forme_juridique": c[2] or None,
+            "type_produit": _type_cardif(section, c[2]), "societe_gestion": c[3] or None,
+            "classification": section, "sri": _sri(c[4]), "sfdr": None,
+            "frais_actif": frais, "retrocessions": retro, "frais_contrat": _valeur_cardif(c[10]),
+            "frais_totaux": frais_tot, "perf_brute_n1": _valeur_cardif(c[5]),
+            "perf_nette_n1": _valeur_cardif(c[8]), "perf_finale_n1": _valeur_cardif(c[12]), "ouvert": True,
+            "complements": {"perf_brute_5ans_annualisee": _valeur_cardif(c[6]),
+                            "perf_nette_5ans_annualisee": _valeur_cardif(c[9]),
+                            "perf_finale_5ans_annualisee": _valeur_cardif(c[13])},
+        })
+    return resultat, anomalies
+
+
+LECTEURS = {"generali": lire_generali, "vieplus": lire_vieplus, "cardif": lire_cardif,
+            "generali_lux": lire_generali_lux, "cardif_panthea": lire_cardif_pdf}
 
 
 def extraire(dossier_assureur: str, fichiers: list[str]):

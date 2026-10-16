@@ -13,7 +13,7 @@ if not os.environ.get("SIMULATION"):
 
 for assureur in sorted(listes_assureurs.LECTEURS):
     dossier = f"donnees/contrats/{assureur}"
-    fichiers = sorted(f for ext in ("xlsx", "xls", "csv") for f in glob.glob(f"{dossier}/*.{ext}"))
+    fichiers = sorted(f for ext in ("xlsx", "xls", "csv", "pdf") for f in glob.glob(f"{dossier}/*.{ext}"))
     print(f"\n===== {assureur} =====")
     if not fichiers:
         print(f"Aucun fichier dans {dossier}.")
