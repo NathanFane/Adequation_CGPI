@@ -27,16 +27,34 @@ def nettoyer(d: pd.DataFrame) -> pd.DataFrame:
     return d[(d["Close"] / mediane - 1).abs() <= ECART_ABERRANT]
 
 
-def chercher(isin: str) -> str | None:
-    """Ticker Yahoo correspondant à un ISIN (cotation à Paris en priorité)."""
+PETITES_BOURSES = (".MU", ".HM", ".DU", ".BE", ".SG", ".HA", ".F")   # cotations peu échangées
+MIN_VL = 120   # environ 6 mois de VL pour accepter un ticker
+
+
+def _rang(symbole: str, type_produit: str | None) -> tuple:
+    """Plus petit = meilleur. Fonds : VL Morningstar (0P…) ; ETF et actions : Paris ; petites bourses en dernier."""
+    vl_officielle = symbole.startswith("0P")
+    fonds = type_produit in (None, "fonds", "autre")
+    return (not (vl_officielle if fonds else symbole.endswith(".PA")),
+            not vl_officielle and symbole.endswith(PETITES_BOURSES))
+
+
+def chercher(isin: str, type_produit: str | None = None) -> str | None:
+    """Ticker Yahoo d'un ISIN : le mieux classé ayant au moins 6 mois de VL sur 1 an."""
     try:
-        quotes = [q for q in yf.Search(isin, max_results=5).quotes if q.get("symbol")]
+        quotes = [q["symbol"] for q in yf.Search(isin, max_results=10).quotes if q.get("symbol")]
     except Exception:
         return None
     if not quotes:
         return None
-    quotes.sort(key=lambda q: not q["symbol"].endswith(".PA"))
-    return quotes[0]["symbol"]
+    quotes.sort(key=lambda t: _rang(t, type_produit))   # tri stable : l'ordre de Yahoo départage
+    for t in quotes:
+        try:
+            if len(yf.Ticker(t).history(period="1y", auto_adjust=False)) >= MIN_VL:
+                return t
+        except Exception:
+            continue
+    return None   # aucun ticker exploitable : EODHD prendra le relais
 
 
 def _telecharger(tickers: list[str], debut: dt.date) -> dict[str, pd.DataFrame]:

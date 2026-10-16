@@ -128,11 +128,11 @@ def actualiser(db, cle: str, isins: list[str] | None = None, progression=None, a
         return q.in_("isin", isins) if isins is not None else q
 
     # 1. Recherche des tickers Yahoo jamais cherchés
-    a_chercher = _tout(requete("isin, nom").is_("ticker_yahoo", "null").eq("absent_yahoo", False))
+    a_chercher = _tout(requete("isin, nom, type_produit").is_("ticker_yahoo", "null").eq("absent_yahoo", False))
     for n, p in enumerate(a_chercher, 1):
         if progression:
             progression(n / max(len(a_chercher), 1), f"Recherche Yahoo : {p['nom'] or p['isin']}")
-        t = yahoo.chercher(p["isin"])
+        t = yahoo.chercher(p["isin"], p["type_produit"])
         db.table("produits").update({"ticker_yahoo": t} if t else {"absent_yahoo": True}).eq("isin", p["isin"]).execute()
 
     # 2. VL Yahoo
