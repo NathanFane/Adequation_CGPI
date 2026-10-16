@@ -98,7 +98,7 @@ def _repartir(candidats, nb_contrats):
     return ordre
 
 
-def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1000, journal=print) -> dict:
+def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2400, journal=print) -> dict:
     """Ajoute jusqu'à `nombre` nouveaux supports (Yahoo, puis EODHD dans la limite du quota).
 
     `max_produits` plafonne le nombre de produits suivis (stockage de la base gratuite Supabase).
@@ -114,7 +114,7 @@ def ajouter_nouveaux(db, cle, user_id, nombre=300, max_produits=1000, journal=pr
     par_isin = {}
     for s in supports:
         if (s.get("ouvert") is False or s.get("avenant_requis") or s["isin"] in produits
-                or s["type_produit"] in ("scpi", "autre")
+                or s["type_produit"] != "fonds"   # fonds uniquement (ni actions, ni ETF, ni SCPI)
                 or classe_assureur(s.get("classification"), s["type_produit"]) == "structure"):
             continue
         if s["isin"] not in par_isin or _completude(s) > _completude(par_isin[s["isin"]]):
