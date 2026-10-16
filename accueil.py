@@ -412,4 +412,5 @@ with onglet_liste:
 # ---------- Pied de page ----------
 st.divider()
 st.page_link("univers.py", label="Univers d'investissement : tous les produits référencés", icon="🗂️")
+st.page_link("en_cours.py", label="Produits en cours de référencement", icon="⏳")
 st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")

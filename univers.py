@@ -86,14 +86,7 @@ else:
         },
     )
 
-with st.expander(f"Produits en cours de référencement ({len(incomplets)})"):
-    if incomplets:
-        st.dataframe(pd.DataFrame([{"ISIN": p["isin"], "Nom": p["nom"], "Type": p["type_produit"],
-                                    "Raison": p["raison"]} for p in incomplets]),
-                     hide_index=True, width="stretch")
-    else:
-        st.write("Aucun.")
-
 st.divider()
+st.page_link("en_cours.py", label=f"Produits en cours de référencement ({len(incomplets)})", icon="⏳")
 st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
 st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")
