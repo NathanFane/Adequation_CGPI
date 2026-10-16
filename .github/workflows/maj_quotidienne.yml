@@ -5,6 +5,10 @@ on:
     - cron: "0 */3 * * *"   # toutes les 3 h pendant le remplissage (500 fonds par passage) ; repasser à "0 6 * * *" ensuite
   workflow_dispatch:
 
+concurrency:   # jamais deux mises à jour en même temps
+  group: maj-vl
+  cancel-in-progress: false
+
 jobs:
   maj:
     runs-on: ubuntu-latest
