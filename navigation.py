@@ -1,4 +1,4 @@
-"""Pied de page commun : liens vers les autres pages, et toujours « Retour à mes produits » en dernier."""
+"""Navigation commune : « Retour à mes produits » en haut de page, et pied de page avec les liens vers les autres pages."""
 import streamlit as st
 
 PAGES = [
@@ -9,10 +9,14 @@ PAGES = [
 ]
 
 
+def retour_en_haut():
+    st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
+
+
 def pied_de_page(page_actuelle: str):
     st.divider()
     for fichier, libelle, icone in PAGES:
         if fichier != page_actuelle:
             st.page_link(fichier, label=libelle, icon=icone)
     if page_actuelle != "accueil.py":
-        st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
+        retour_en_haut()

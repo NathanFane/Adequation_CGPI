@@ -4,7 +4,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page
+from navigation import pied_de_page, retour_en_haut
 
 from base import db
 from calculs import lire_indices, metriques, taux_sans_risque
@@ -14,6 +14,7 @@ from indices import REFERENCES, classe_indice, zone_indice
 NOMS_CLASSES = {"monetaire": "Monétaire", "obligations": "Obligations", "actions": "Actions", "mixte": "Mixte",
                 "immobilier": "Immobilier", "matieres_premieres": "Matières premières"}
 
+retour_en_haut()
 st.title("Indices de référence")
 st.caption(f"Les {len(REFERENCES)} indices auxquels chaque fonds est comparé (corrélation des rendements "
            "hebdomadaires). Chaque indice est représenté par un ou plusieurs ETF (source Yahoo Finance, "

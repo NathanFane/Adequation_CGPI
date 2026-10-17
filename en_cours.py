@@ -2,12 +2,13 @@
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page
+from navigation import pied_de_page, retour_en_haut
 
 from base import db
 from collecte import _tout
 from remplissage import NOMS_CONTRATS
 
+retour_en_haut()
 st.title("Produits en cours de référencement")
 st.caption("Produits suivis dont les VL ou les indicateurs ne sont pas encore disponibles. "
            "Ils rejoignent l'univers d'investissement dès que leurs données sont complètes.")

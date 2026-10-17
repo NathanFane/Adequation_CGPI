@@ -76,7 +76,7 @@ existe, sinon le seul profil de la table `utilisateurs`.
 | `en_cours.py` | **Produits en cours de référencement** (produits incomplets avec la raison) |
 | `page_indices.py` | **Indices de référence** : composition, indicateurs 5 ans, fonds rattachés, graphique base 100 |
 | `methodologie.py` | **Méthodologie** : données, formules (LaTeX), calcul pas à pas sur un produit, limites |
-| `navigation.py` | `pied_de_page(page)` : liens vers les autres pages + « Retour à mes produits » en dernier |
+| `navigation.py` | `retour_en_haut()` : lien « Retour à mes produits » en haut de chaque page (sauf Mes produits) ; `pied_de_page(page)` : liens vers les autres pages + « Retour à mes produits » en dernier |
 
 **Mes produits – onglet Visualiser** (`accueil.py`) :
 - bandeau « Annuler » du dernier enregistrement (toujours en haut de l'onglet) ;

@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page
+from navigation import pied_de_page, retour_en_haut
 
 from base import db
 from collecte import _tout
@@ -14,6 +14,7 @@ NOMS_CLASSES = {"monetaire": "Monétaire", "obligations": "Obligations", "action
                 "immobilier": "Immobilier", "matieres_premieres": "Matières premières",
                 "alternatif": "Alternatif", "structure": "Structuré / à formule"}
 
+retour_en_haut()
 st.title("Univers d'investissement")
 st.caption("Produits référencés dont les VL et tous les indicateurs sont disponibles. "
            "Un produit apparaît ici dès que ses données sont complètes.")

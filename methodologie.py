@@ -4,7 +4,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page
+from navigation import pied_de_page, retour_en_haut
 
 from base import USER_ID, db
 from calculs import (JOURS, MIN_POINTS, MIN_SEMAINES, correlations, detail, lire_historique, lire_indices,
@@ -29,7 +29,7 @@ def tnb(x, d=4):
     return nb(x, d).replace(",", "{,}").replace(" ", r"\,")
 
 
-st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
+retour_en_haut()
 st.title("Méthodologie des calculs")
 st.caption("Comment sont calculées les métriques affichées dans « Mes produits ».")
 
