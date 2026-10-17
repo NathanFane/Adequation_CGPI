@@ -108,11 +108,30 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
     return rapport
 
 
+def executer(requete, essais=4):
+    """Exécute une requête Supabase en réessayant si la connexion est coupée.
+
+    Au-delà de ~20 000 requêtes sur une même connexion, le serveur la ferme (« Server disconnected ») :
+    la requête suivante en rouvre une nouvelle.
+    """
+    import time
+
+    import httpx
+
+    for n in range(essais):
+        try:
+            return requete.execute()
+        except (httpx.TransportError, httpx.RemoteProtocolError):
+            if n == essais - 1:
+                raise
+            time.sleep(2 * (n + 1))
+
+
 def _tout(requete, taille=1000):
     """Lit toutes les lignes d'une requête Supabase (pagination par 1000)."""
     lignes, debut = [], 0
     while True:
-        lot = requete.range(debut, debut + taille - 1).execute().data
+        lot = executer(requete.range(debut, debut + taille - 1)).data
         lignes += lot
         if len(lot) < taille:
             return lignes

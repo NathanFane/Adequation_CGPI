@@ -114,8 +114,9 @@ def lire_historique(db, isin: str, depuis: dt.date) -> pd.Series:
     """Lit les VL ajustées d'un produit (par pages de 1 000 lignes, limite de Supabase)."""
     lignes, debut = [], 0
     while True:
-        page = (db.table("historique").select("date, vl, vl_ajustee").eq("isin", isin)
-                .gte("date", depuis.isoformat()).order("date").range(debut, debut + 999).execute().data)
+        from collecte import executer
+        page = executer(db.table("historique").select("date, vl, vl_ajustee").eq("isin", isin)
+                        .gte("date", depuis.isoformat()).order("date").range(debut, debut + 999)).data
         lignes += page
         if len(page) < 1000:
             break
@@ -189,7 +190,7 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
     L'indice de référence de chaque produit est celui qui lui est le plus corrélé, sauf s'il a été
     choisi à la main par un CGPI.
     """
-    from collecte import _tout
+    from collecte import _tout, executer
     from indices import SEUIL_ZONE, classe_indice, zone_indice
 
     requete = (db.table("produits").select("isin, indice_reference, indice_manuel, classe_actifs, classe_source, zone")
@@ -203,8 +204,15 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
     refs = rendements_references(lire_indices(db))
     rapport = {"calcules": [], "insuffisants": [], "taux_sans_risque": rf}
     lignes = []
-    for p in produits:
-        vl = lire_historique(db, p["isin"], depuis)
+    for n, p in enumerate(produits, 1):
+        if len(lignes) >= 200:   # enregistrement au fil de l'eau : une coupure ne perd pas tout le calcul
+            executer(db.table("metriques").upsert(lignes, on_conflict="isin,date_calcul"))
+            lignes = []
+        try:
+            vl = lire_historique(db, p["isin"], depuis)
+        except Exception as e:   # un produit illisible ne doit pas arrêter le calcul des autres
+            rapport.setdefault("erreurs", []).append(f"{p['isin']} : {e}")
+            continue
         m = metriques(vl, rf)
         if m is None:
             rapport["insuffisants"].append(p["isin"])
@@ -226,11 +234,11 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
             if classe != p["classe_actifs"]:
                 maj.update({"classe_actifs": classe, "classe_source": "indice" if classe else None})
         if maj:
-            db.table("produits").update(maj).eq("isin", p["isin"]).execute()
+            executer(db.table("produits").update(maj).eq("isin", p["isin"]))
         m["indice_reference"] = indice
         m["correlation_indice"] = round(rho, 4) if rho is not None else None
         lignes.append({"isin": p["isin"], "date_calcul": dt.date.today().isoformat(), **m})
         rapport["calcules"].append(p["isin"])
     for i in range(0, len(lignes), 500):
-        db.table("metriques").upsert(lignes[i:i + 500], on_conflict="isin,date_calcul").execute()
+        executer(db.table("metriques").upsert(lignes[i:i + 500], on_conflict="isin,date_calcul"))
     return rapport
