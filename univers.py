@@ -23,82 +23,67 @@ def _nouvel_id():
     return etat["suivant"]
 
 
-def _ajouter_groupe():
-    st.session_state.filtres["groupes"].append({"id": _nouvel_id(), "criteres": [_nouvel_id()]})
+def _ajouter_critere():
+    st.session_state.filtres["criteres"].append(_nouvel_id())
 
 
-def _ajouter_critere(g):
-    g["criteres"].append(_nouvel_id())
-
-
-def _retirer_critere(g, cid):
-    g["criteres"].remove(cid)
-    if not g["criteres"]:
-        st.session_state.filtres["groupes"].remove(g)
+def _retirer_critere(cid):
+    st.session_state.filtres["criteres"].remove(cid)
 
 
 def _reinitialiser():
     for k in [k for k in st.session_state if k.startswith("flt_")]:
         del st.session_state[k]
-    st.session_state.filtres = {"groupes": [], "suivant": 0}
+    st.session_state.filtres = {"criteres": [], "suivant": 0}
 
 
 def section_filtres(df):
-    """Section « Filtres » : groupes de critères reliés par ET / OU. Renvoie le tableau filtré."""
-    st.session_state.setdefault("filtres", {"groupes": [], "suivant": 0})
+    """Section « Filtres » : critères reliés deux à deux par ET ou OU. Renvoie le tableau filtré."""
+    if "criteres" not in st.session_state.get("filtres", {}):
+        st.session_state.filtres = {"criteres": [], "suivant": 0}
     etat = st.session_state.filtres
     indicateurs = F.LISTES + list(F.NOMBRES)
-    groupes = []
+    criteres = []
     with st.expander("Filtres", expanded=True):
         st.caption("Dans un critère, plusieurs valeurs = OU (ex. Zone = France ou Monde). "
-                   "Dans un groupe, les critères sont reliés par ET ou OU. Entre les groupes, un seul lien ET ou OU.")
-        for n, g in enumerate(etat["groupes"], 1):
-            with st.container(border=True):
-                t1, t2, t3 = st.columns([2, 3, 1])
-                t1.markdown(f"**Groupe {n}**")
-                lien = t2.radio("Lien entre les critères du groupe", ["ET", "OU"], horizontal=True,
-                                key=f"flt_lien_{g['id']}", label_visibility="collapsed")
-                t3.button("Supprimer le groupe", key=f"flt_supg_{g['id']}",
-                          on_click=lambda g=g: etat["groupes"].remove(g))
-                criteres = []
-                for cid in list(g["criteres"]):
-                    c1, c2, c3, c4 = st.columns([3, 2, 4, 1])
-                    ind = c1.selectbox("Indicateur", indicateurs, key=f"flt_ind_{cid}", label_visibility="collapsed")
-                    if ind in F.NOMBRES:
-                        op = c2.selectbox("Opérateur", F.OPERATEURS_NOMBRE, key=f"flt_op_{cid}",
-                                          label_visibility="collapsed")
-                        unite = " (%)" if F.NOMBRES[ind] else ""
-                        if op in (F.ENTRE, F.HORS):
-                            v1, v2 = c3.columns(2)
-                            a = v1.number_input("de" + unite, value=None, key=f"flt_a_{cid}", placeholder="de" + unite,
-                                                label_visibility="collapsed")
-                            b = v2.number_input("à" + unite, value=None, key=f"flt_b_{cid}", placeholder="à" + unite,
-                                                label_visibility="collapsed")
-                            valeurs = [a, b] if a is not None and b is not None else []
-                        else:
-                            a = c3.number_input("valeur" + unite, value=None, key=f"flt_a_{cid}",
-                                                placeholder="valeur" + unite, label_visibility="collapsed")
-                            valeurs = [a] if a is not None else []
-                    else:
-                        ops = F.OPERATEURS_LISTE_MULTIPLE if ind in F.MULTIPLES else F.OPERATEURS_LISTE
-                        op = c2.selectbox("Opérateur", ops, key=f"flt_op_{cid}", label_visibility="collapsed")
-                        valeurs = c3.multiselect("Valeurs", F.valeurs_possibles(df, ind), key=f"flt_v_{cid}",
-                                                 placeholder="Choisir une ou plusieurs valeurs",
-                                                 label_visibility="collapsed")
-                    c4.button("✕", key=f"flt_supc_{cid}", help="Retirer ce critère",
-                              on_click=_retirer_critere, args=(g, cid))
-                    if valeurs:
-                        criteres.append({"indicateur": ind, "operateur": op, "valeurs": valeurs})
-                st.button("+ Ajouter un critère", key=f"flt_addc_{g['id']}", on_click=_ajouter_critere, args=(g,))
-                groupes.append({"lien": lien, "criteres": criteres})
-        b1, b2, b3 = st.columns([2, 3, 2])
-        b1.button("+ Ajouter un groupe", on_click=_ajouter_groupe)
-        lien_groupes = b2.radio("Lien entre les groupes", ["ET", "OU"], horizontal=True, key="flt_lien_groupes")
+                   "Entre deux critères, choisissez ET ou OU. Le ET est prioritaire : "
+                   "« A ET B OU C » = « (A ET B) OU C ».")
+        for n, cid in enumerate(list(etat["criteres"])):
+            lien = "ET"
+            if n:
+                lien = st.radio("Lien avec le critère précédent", ["ET", "OU"], horizontal=True,
+                                key=f"flt_lien_{cid}", label_visibility="collapsed")
+            c1, c2, c3, c4 = st.columns([3, 3, 4, 1])
+            ind = c1.selectbox("Indicateur", indicateurs, key=f"flt_ind_{cid}", label_visibility="collapsed")
+            if ind in F.NOMBRES:
+                op = c2.selectbox("Opérateur", F.OPERATEURS_NOMBRE, key=f"flt_op_{cid}", label_visibility="collapsed")
+                unite = " (%)" if F.NOMBRES[ind] else ""
+                if op in (F.ENTRE, F.HORS):
+                    v1, v2 = c3.columns(2)
+                    a = v1.number_input("de" + unite, value=None, key=f"flt_a_{cid}", placeholder="de" + unite,
+                                        label_visibility="collapsed")
+                    b = v2.number_input("à" + unite, value=None, key=f"flt_b_{cid}", placeholder="à" + unite,
+                                        label_visibility="collapsed")
+                    valeurs = [a, b] if a is not None and b is not None else []
+                else:
+                    a = c3.number_input("valeur" + unite, value=None, key=f"flt_a_{cid}",
+                                        placeholder="valeur" + unite, label_visibility="collapsed")
+                    valeurs = [a] if a is not None else []
+            else:
+                ops = F.OPERATEURS_LISTE_MULTIPLE if ind in F.MULTIPLES else F.OPERATEURS_LISTE
+                op = c2.selectbox("Opérateur", ops, key=f"flt_op_{cid}", label_visibility="collapsed")
+                valeurs = c3.multiselect("Valeurs", F.valeurs_possibles(df, ind), key=f"flt_v_{cid}",
+                                         placeholder="Choisir une ou plusieurs valeurs", label_visibility="collapsed")
+            c4.button("✕", key=f"flt_supc_{cid}", help="Retirer ce critère", on_click=_retirer_critere, args=(cid,))
+            if valeurs:
+                criteres.append({"lien": lien, "indicateur": ind, "operateur": op, "valeurs": valeurs})
+        b1, _, b3 = st.columns([2, 3, 2])
+        b1.button("+ Ajouter un critère", on_click=_ajouter_critere)
         b3.button("Réinitialiser les filtres", on_click=_reinitialiser)
-        formule = F.decrire(groupes, lien_groupes)
-        if formule:
-            st.info("Sélection : " + formule)
-    return F.appliquer(df, groupes, lien_groupes)
+        if criteres:
+            criteres[0]["lien"] = "ET"
+            st.info("Sélection : " + F.decrire(criteres))
+    return F.appliquer(df, criteres)
 
 
 @st.cache_data(ttl=600)

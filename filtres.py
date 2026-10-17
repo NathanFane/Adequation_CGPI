@@ -1,9 +1,9 @@
 """Filtres combinables (ET / OU) sur un tableau de produits.
 
-Structure : des groupes de critères.
+Structure : une liste de critères.
 - Dans un critère : plusieurs valeurs d'un même indicateur (ex. Zone = France OU Monde).
-- Dans un groupe : les critères sont reliés par ET ou par OU (au choix pour chaque groupe).
-- Entre les groupes : ET ou OU (un seul choix, pour éviter toute ambiguïté de priorité).
+- Entre deux critères : ET ou OU, au choix. Comme en mathématiques et en SQL, ET est prioritaire :
+  « A ET B OU C » se lit « (A ET B) OU C ».
 """
 import numpy as np
 import pandas as pd
@@ -64,21 +64,25 @@ def _masque_critere(df: pd.DataFrame, c: dict) -> pd.Series:
     return ~dedans if op == DIFFERENT else dedans
 
 
-def appliquer(df: pd.DataFrame, groupes: list, lien_groupes: str = "ET") -> pd.DataFrame:
-    """groupes = [{"lien": "ET"|"OU", "criteres": [{"indicateur", "operateur", "valeurs"}]}]."""
-    masques = []
-    for g in groupes:
-        ms = [_masque_critere(df, c) for c in g["criteres"]]
-        if ms:
-            masques.append(np.logical_and.reduce(ms) if g["lien"] == "ET" else np.logical_or.reduce(ms))
-    if not masques:
+def appliquer(df: pd.DataFrame, criteres: list) -> pd.DataFrame:
+    """criteres = [{"lien": "ET"|"OU" (ignoré pour le 1er), "indicateur", "operateur", "valeurs"}]."""
+    if not criteres:
         return df
-    total = np.logical_and.reduce(masques) if lien_groupes == "ET" else np.logical_or.reduce(masques)
-    return df[total]
+    blocs, bloc = [], None     # OU entre les blocs, ET à l'intérieur d'un bloc
+    for n, c in enumerate(criteres):
+        m = _masque_critere(df, c)
+        if n == 0 or c["lien"] == "OU":
+            if bloc is not None:
+                blocs.append(bloc)
+            bloc = m
+        else:
+            bloc = bloc & m
+    blocs.append(bloc)
+    return df[np.logical_or.reduce(blocs)]
 
 
-def decrire(groupes: list, lien_groupes: str = "ET") -> str:
-    """Formule lisible, ex. (Zone = France ou Monde) ET (Volatilité > 2 % OU Max Drawdown entre 20 % et 30 %)."""
+def decrire(criteres: list) -> str:
+    """Formule lisible, ex. Zone = France ou Monde ET Volatilité > 2 % OU Max Drawdown compris entre 20 % et 30 %."""
     def nombre(col, v):
         return f"{v:g} %" if NOMBRES[col] else f"{v:g}"
 
@@ -92,9 +96,7 @@ def decrire(groupes: list, lien_groupes: str = "ET") -> str:
         neg = "≠" if op in (DIFFERENT, ABSENT) else "="
         return f"{col} {neg} {lien.join(vals)}"
 
-    morceaux = []
-    for g in groupes:
-        cs = [critere(c) for c in g["criteres"] if c["valeurs"] and c["valeurs"][0] is not None]
-        if cs:
-            morceaux.append("(" + f" {g['lien']} ".join(cs) + ")")
-    return f" {lien_groupes} ".join(morceaux)
+    texte = ""
+    for n, c in enumerate(criteres):
+        texte += (f" {c['lien']} " if n else "") + critere(c)
+    return texte
