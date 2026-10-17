@@ -80,11 +80,13 @@ existe, sinon le seul profil de la table `utilisateurs`.
 
 **Mes produits – onglet Visualiser** (`accueil.py`) :
 - bandeau « Annuler » du dernier enregistrement (toujours en haut de l'onglet) ;
-- expander « Frais de mes contrats » (frais de gestion UC, fonds euros, versements, arbitrages, en %) ;
+- expander « Mes contrats » : frais (gestion UC, fonds euros, versements, arbitrages, en %) et colonne
+  « Supprimer » (contrat + liste de ses produits ; case de confirmation ; annulable ; fonctionne aussi pour
+  un contrat vide) ;
 - bouton « Récupérer les données » (Yahoo puis EODHD, puis métriques) ;
 - filtres simples : contrat, type, classe d'actifs, zone ;
-- expander « Suppression en masse » : retirer d'un coup les lignes affichées (selon les filtres) ou
-  supprimer des contrats entiers ; case de confirmation obligatoire ; annulable ;
+- expander « Suppression en masse » : retirer d'un coup les lignes affichées (selon les filtres) ;
+  case de confirmation obligatoire ; annulable ;
 - tableau éditable (`st.data_editor`) : une ligne = un couple (produit, contrat). Colonnes : Retirer du
   contrat, ISIN, Nom, Type (modifiable), Classe d'actifs, Zone, Contrat, Statut, VL jusqu'au, Mis à jour
   le, Source des VL, Indice de référence (modifiable : Automatique ou l'un des 54), Indice retenu, Frais
@@ -287,6 +289,8 @@ pour enrichir l'univers. Les SCPI ont souvent un code interne au lieu d'un ISIN 
 - Filtres : groupes supprimés, ET/OU entre chaque critère, ET prioritaire.
 - Ordre des onglets : Visualiser d'abord.
 - Suppression en masse avec confirmation et annulation.
+- Suppression des contrats déplacée dans l'expander « Mes contrats » (avant : dans « Suppression en masse »,
+  invisible quand aucun produit n'était affiché).
 
 ---
 

@@ -39,8 +39,8 @@ def _retirer_liens(liens):
             db.table("contrat_produits").delete().eq("contrat_id", cid).in_("isin", isins[i:i + 200]).execute()
 
 
-def suppression_en_masse(vue: pd.DataFrame, contrats: pd.DataFrame):
-    """Retirer d'un coup les lignes affichées (selon les filtres), ou supprimer des contrats entiers."""
+def suppression_en_masse(vue: pd.DataFrame):
+    """Retirer d'un coup les lignes affichées (selon les filtres)."""
     with st.expander("Suppression en masse"):
         st.markdown(f"**Retirer de leurs contrats les {len(vue)} ligne(s) affichée(s)** "
                     "(utilisez les filtres ci-dessus pour choisir lesquelles).")
@@ -55,28 +55,26 @@ def suppression_en_masse(vue: pd.DataFrame, contrats: pd.DataFrame):
             st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
             st.rerun()
 
-        st.divider()
-        st.markdown("**Supprimer des contrats entiers** (le contrat et la liste de ses produits ; "
-                    "les fonds restent dans l'univers d'investissement).")
-        choix = st.multiselect("Contrats à supprimer", list(contrats["nom"]), key="contrats_a_supprimer")
-        ok2 = st.checkbox("Je confirme la suppression de ces contrats", key="confirme_suppression_contrats")
-        if st.button("Supprimer les contrats choisis", disabled=not (choix and ok2)):
-            supprimes = []
-            with st.spinner("Suppression en cours…"):
-                for _, c in contrats[contrats["nom"].isin(choix)].iterrows():
-                    liens = _tout(db.table("contrat_produits").select("isin, frais_specifiques")
-                                  .eq("contrat_id", int(c["id"])).order("isin"))
-                    contrat = {k: (None if pd.isna(c[k]) else (c[k].item() if hasattr(c[k], "item") else c[k])) for k in
-                               ("nom", "assureur", "frais_gestion_uc", "frais_gestion_euro",
-                                "frais_versement", "frais_arbitrage")}
-                    contrat["user_id"] = USER_ID
-                    supprimes.append((contrat, liens))
-                    db.table("contrats").delete().eq("id", int(c["id"])).eq("user_id", USER_ID).execute()
-            st.session_state["dernier_enregistrement"] = {
-                "resume": f"{len(supprimes)} contrat(s) supprimé(s)", "contrats_supprimes": supprimes,
-                "retraits": [], "types": [], "indices": []}
-            st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
-            st.rerun()
+
+def supprimer_contrats(contrats: pd.DataFrame, ids: list[int]):
+    """Supprime des contrats entiers (le contrat et la liste de ses produits) ; annulable."""
+    supprimes = []
+    with st.spinner("Suppression en cours…"):
+        for _, c in contrats[contrats["id"].isin(ids)].iterrows():
+            liens = _tout(db.table("contrat_produits").select("isin, frais_specifiques")
+                          .eq("contrat_id", int(c["id"])).order("isin"))
+            contrat = {k: (None if pd.isna(c[k]) else (c[k].item() if hasattr(c[k], "item") else c[k])) for k in
+                       ("nom", "assureur", "frais_gestion_uc", "frais_gestion_euro",
+                        "frais_versement", "frais_arbitrage")}
+            contrat["user_id"] = USER_ID
+            supprimes.append((contrat, liens))
+            db.table("contrats").delete().eq("id", int(c["id"])).eq("user_id", USER_ID).execute()
+    st.session_state["dernier_enregistrement"] = {
+        "resume": f"{len(supprimes)} contrat(s) supprimé(s)", "contrats_supprimes": supprimes,
+        "retraits": [], "types": [], "indices": []}
+    st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+    st.session_state["version_frais"] = st.session_state.get("version_frais", 0) + 1
+    st.rerun()
 
 
 # ---------- Accès aux données ----------
@@ -260,6 +258,7 @@ with onglet_liste:
                 calculer_et_enregistrer(db, [i for i, _ in precedent["indices"]])
             del st.session_state["dernier_enregistrement"]
             st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+            st.session_state["version_frais"] = st.session_state.get("version_frais", 0) + 1
             st.rerun()
 
     contrats = mes_contrats()
@@ -293,12 +292,14 @@ with onglet_liste:
                                    "Statut", "VL jusqu'au", "Mis à jour le", "Source des VL",
                                    "Indice de référence", "Indice retenu", "Frais spécifiques (%)", "contrat_id"])
 
-        # Frais des contrats
-        with st.expander("Frais de mes contrats"):
+        # Mes contrats : frais et suppression
+        with st.expander("Mes contrats"):
             st.caption("En % par an pour les frais de gestion, en % du montant pour les versements et arbitrages. "
-                       "Un support facturé différemment se règle dans la colonne « Frais spécifiques » du tableau.")
+                       "Un support facturé différemment se règle dans la colonne « Frais spécifiques » du tableau. "
+                       "Cochez « Supprimer » pour supprimer un contrat et la liste de ses produits "
+                       "(les fonds restent dans l'univers d'investissement).")
             frais = pd.DataFrame({
-                "id": contrats["id"], "Contrat": contrats["nom"], "Assureur": contrats["assureur"],
+                "Supprimer": False, "id": contrats["id"], "Contrat": contrats["nom"], "Assureur": contrats["assureur"],
                 "Gestion UC (%)": contrats["frais_gestion_uc"].map(en_pourcent),
                 "Gestion fonds euros (%)": contrats["frais_gestion_euro"].map(en_pourcent),
                 "Versements (%)": contrats["frais_versement"].map(en_pourcent),
@@ -306,11 +307,14 @@ with onglet_liste:
             })
             frais_edites = st.data_editor(
                 frais, hide_index=True, width="stretch", disabled=["Contrat"],
-                column_config={"id": None, **{c: st.column_config.NumberColumn(min_value=0, max_value=20, format="%.2f")
-                                              for c in frais.columns if c.endswith("(%)")}},
+                column_config={"id": None, "Supprimer": st.column_config.CheckboxColumn(
+                                   help="Cocher pour supprimer ce contrat"),
+                               **{c: st.column_config.NumberColumn(min_value=0, max_value=20, format="%.2f")
+                                  for c in frais.columns if c.endswith("(%)")}},
                 key=f"frais_{st.session_state.get('version_frais', 0)}",
             )
-            modifie = not frais_edites.fillna(-1).equals(frais.fillna(-1))
+            a_supprimer = frais_edites.loc[frais_edites["Supprimer"], "id"].astype(int).tolist()
+            modifie = not frais_edites.drop(columns="Supprimer").fillna(-1).equals(frais.drop(columns="Supprimer").fillna(-1))
             if st.button("Enregistrer les frais", disabled=not modifie):
                 for _, l in frais_edites.iterrows():
                     db.table("contrats").update({
@@ -322,6 +326,11 @@ with onglet_liste:
                     }).eq("id", int(l["id"])).eq("user_id", USER_ID).execute()
                 st.session_state["version_frais"] = st.session_state.get("version_frais", 0) + 1
                 st.rerun()
+            if a_supprimer:
+                ok = st.checkbox(f"Je confirme la suppression de {len(a_supprimer)} contrat(s)",
+                                 key="confirme_suppression_contrats")
+                if st.button("Supprimer les contrats cochés", type="primary", disabled=not ok):
+                    supprimer_contrats(contrats, a_supprimer)
 
         # Récupération des VL (Yahoo Finance, EODHD en secours) pour les produits de l'utilisateur
         if st.button("Récupérer les données", help="Télécharge les VL manquantes de vos produits"):
@@ -378,7 +387,7 @@ with onglet_liste:
         if df.empty:
             st.info("Aucun produit.")
         else:
-            suppression_en_masse(df, contrats)
+            suppression_en_masse(df)
             st.caption(f"{len(df)} ligne(s) = {df['ISIN'].nunique()} produit(s) distinct(s) "
                        "(un produit présent dans 3 contrats compte pour 3 lignes) · "
                        f"{(df['Statut'] == 'introuvable').sum()} introuvable(s) · "
