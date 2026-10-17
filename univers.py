@@ -68,7 +68,7 @@ def section_filtres(df):
                         op = c2.selectbox("Opérateur", F.OPERATEURS_NOMBRE, key=f"flt_op_{cid}",
                                           label_visibility="collapsed")
                         unite = " (%)" if F.NOMBRES[ind] else ""
-                        if op in ("entre", "hors de"):
+                        if op in (F.ENTRE, F.HORS):
                             v1, v2 = c3.columns(2)
                             a = v1.number_input("de" + unite, value=None, key=f"flt_a_{cid}", placeholder="de" + unite,
                                                 label_visibility="collapsed")

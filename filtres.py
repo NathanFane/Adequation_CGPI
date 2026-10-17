@@ -15,9 +15,15 @@ NOMBRES = {  # colonne: (en pourcentage ?)
     "VaR 97,5 % 1 an": True, "Max Drawdown": True, "Sharpe": False, "Sortino": False,
     "Corrélation à l'indice": False,
 }
-OPERATEURS_LISTE = ["est l'un de (OU)", "n'est aucun de"]
-OPERATEURS_LISTE_MULTIPLE = ["contient l'un de (OU)", "contient tous (ET)", "ne contient aucun de"]   # Contrats
-OPERATEURS_NOMBRE = [">", "≥", "<", "≤", "entre", "hors de"]
+EGAL, DIFFERENT = "égal à l'une des valeurs suivantes", "différent des valeurs suivantes"
+DANS_UN, DANS_TOUS, ABSENT = ("présent dans l'un des contrats suivants", "présent dans tous les contrats suivants",
+                              "absent des contrats suivants")
+SUP, SUP_EG, INF, INF_EG, ENTRE, HORS = ("supérieur à", "supérieur ou égal à", "inférieur à", "inférieur ou égal à",
+                                         "compris entre", "en dehors de")
+OPERATEURS_LISTE = [EGAL, DIFFERENT]
+OPERATEURS_LISTE_MULTIPLE = [DANS_UN, DANS_TOUS, ABSENT]   # Contrats
+OPERATEURS_NOMBRE = [SUP, SUP_EG, INF, INF_EG, ENTRE, HORS]
+SYMBOLES = {SUP: ">", SUP_EG: "≥", INF: "<", INF_EG: "≤"}
 MULTIPLES = {"Contrats"}   # colonnes contenant plusieurs valeurs séparées par « , »
 
 
@@ -38,9 +44,9 @@ def _masque_critere(df: pd.DataFrame, c: dict) -> pd.Series:
         b = f(vals[1]) if len(vals) > 1 and vals[1] is not None else None
         if a is None:
             return pd.Series(True, index=df.index)
-        m = {">": x > a, "≥": x >= a, "<": x < a, "≤": x <= a,
-             "entre": x.between(min(a, b if b is not None else a), max(a, b if b is not None else a)),
-             "hors de": ~x.between(min(a, b if b is not None else a), max(a, b if b is not None else a))}[op]
+        b = a if b is None else b
+        m = {SUP: x > a, SUP_EG: x >= a, INF: x < a, INF_EG: x <= a,
+             ENTRE: x.between(min(a, b), max(a, b)), HORS: ~x.between(min(a, b), max(a, b))}[op]
         return m & x.notna()   # une valeur manquante ne satisfait jamais un critère chiffré
     if not vals:
         return pd.Series(True, index=df.index)
@@ -50,12 +56,12 @@ def _masque_critere(df: pd.DataFrame, c: dict) -> pd.Series:
         x = df[col].astype(str)
     if col in MULTIPLES:
         ens = x.map(lambda v: set(v.split(", ")))
-        if op.startswith("contient tous"):
+        if op == DANS_TOUS:
             return ens.map(lambda s: set(vals) <= s)
         trouve = ens.map(lambda s: bool(s & set(vals)))
-        return ~trouve if op.startswith("ne contient") else trouve
+        return ~trouve if op == ABSENT else trouve
     dedans = x.isin(vals)
-    return ~dedans if op.startswith("n'est") else dedans
+    return ~dedans if op == DIFFERENT else dedans
 
 
 def appliquer(df: pd.DataFrame, groupes: list, lien_groupes: str = "ET") -> pd.DataFrame:
@@ -79,11 +85,11 @@ def decrire(groupes: list, lien_groupes: str = "ET") -> str:
     def critere(c):
         col, op, vals = c["indicateur"], c["operateur"], c["valeurs"]
         if col in NOMBRES:
-            if op in ("entre", "hors de"):
+            if op in (ENTRE, HORS):
                 return f"{col} {op} {nombre(col, vals[0])} et {nombre(col, vals[1])}"
-            return f"{col} {op} {nombre(col, vals[0])}"
-        lien = " et " if "tous" in op else " ou "
-        neg = "≠" if ("aucun" in op) else "="
+            return f"{col} {SYMBOLES[op]} {nombre(col, vals[0])}"
+        lien = " et " if op == DANS_TOUS else " ou "
+        neg = "≠" if op in (DIFFERENT, ABSENT) else "="
         return f"{col} {neg} {lien.join(vals)}"
 
     morceaux = []
