@@ -114,6 +114,8 @@ df = pd.DataFrame([{
     "Indice retenu": PAR_CODE.get(p["indice_reference"], {}).get("nom"),
     "Corrélation à l'indice": p["correlation_indice"],
     "VL jusqu'au": p["derniere_vl"],
+    "Mis à jour le": (p.get("derniere_maj") or "")[:10] or None,
+    "Source des VL": {"yahoo": "Yahoo Finance", "eodhd": "EODHD"}.get(p["source_vl"]),
 } for p in complets])
 
 c1, c2, c3, c4 = st.columns(4)

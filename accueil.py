@@ -266,7 +266,8 @@ with onglet_liste:
     else:
         rows = _tout(db.table("contrat_produits")
                      .select("contrat_id, isin, frais_specifiques, contrats(nom), produits(nom, type_produit, "
-                             "classe_actifs, zone, statut, derniere_vl, indice_reference, indice_manuel)")
+                             "classe_actifs, zone, statut, derniere_vl, derniere_maj, source_vl, indice_reference, "
+                             "indice_manuel)")
                      .in_("contrat_id", contrats["id"].tolist()).order("isin").order("contrat_id"))
         df = pd.DataFrame([{
             "Retirer du contrat": False,
@@ -278,6 +279,8 @@ with onglet_liste:
             "Contrat": r["contrats"]["nom"],
             "Statut": r["produits"]["statut"],
             "VL jusqu'au": r["produits"]["derniere_vl"],
+            "Mis à jour le": (r["produits"].get("derniere_maj") or "")[:10] or None,
+            "Source des VL": {"yahoo": "Yahoo Finance", "eodhd": "EODHD"}.get(r["produits"].get("source_vl")),
             "Indice de référence": (PAR_CODE[r["produits"]["indice_reference"]]["nom"]
                                     if r["produits"]["indice_manuel"] and r["produits"]["indice_reference"] in PAR_CODE
                                     else AUTO),
@@ -285,7 +288,7 @@ with onglet_liste:
             "Frais spécifiques (%)": en_pourcent(r.get("frais_specifiques")),
             "contrat_id": r["contrat_id"],
         } for r in rows], columns=["Retirer du contrat", "ISIN", "Nom", "Type", "Classe d'actifs", "Zone", "Contrat",
-                                   "Statut", "VL jusqu'au",
+                                   "Statut", "VL jusqu'au", "Mis à jour le", "Source des VL",
                                    "Indice de référence", "Indice retenu", "Frais spécifiques (%)", "contrat_id"])
 
         # Frais des contrats
@@ -383,7 +386,8 @@ with onglet_liste:
             edite = st.data_editor(
                 df,
                 hide_index=True, width="stretch",
-                disabled=["ISIN", "Nom", "Classe d'actifs", "Zone", "Contrat", "Statut", "VL jusqu'au", "Indice retenu",
+                disabled=["ISIN", "Nom", "Classe d'actifs", "Zone", "Contrat", "Statut", "VL jusqu'au", "Mis à jour le",
+                          "Source des VL", "Indice retenu",
                           *COLONNES_METRIQUES],
                 column_config={
                     "contrat_id": None,

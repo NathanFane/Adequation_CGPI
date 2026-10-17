@@ -140,7 +140,7 @@ def mettre_a_jour(db, produits: list[dict], progression=None) -> dict:
             else:
                 lignes = _lignes(p["isin"], d, dt.date.fromisoformat(p["derniere_vl"]) + dt.timedelta(days=1))
             _enregistrer(db, lignes)
-            maj = {"source_vl": "yahoo"}
+            maj = {"source_vl": "yahoo", "derniere_maj": dt.datetime.now(dt.timezone.utc).isoformat()}
             if lignes:
                 maj["derniere_vl"] = max(l["date"] for l in lignes)
                 rapport["maj"].append((p["isin"], len(lignes)))

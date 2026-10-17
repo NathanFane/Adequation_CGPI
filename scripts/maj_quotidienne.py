@@ -1,6 +1,6 @@
 """Tâche quotidienne (GitHub Actions).
 
-1. Met à jour les VL : Yahoo Finance chaque jour ; EODHD (secours, 20 appels/jour) tous les 30 jours.
+1. Met à jour les VL : Yahoo Finance chaque jour ; EODHD (secours, 20 appels/jour) tous les 7 jours.
 2. Ajoute de nouveaux supports issus des listes des assureurs (fonds uniquement, 500 par jour, plafond 2 800).
 3. Met à jour les indices de référence (yfinance) et recalcule les métriques.
 """
@@ -14,7 +14,7 @@ import collecte  # noqa: E402
 from calculs import calculer_et_enregistrer  # noqa: E402
 from remplissage import ajouter_nouveaux  # noqa: E402
 
-RAFRAICHISSEMENT_JOURS = 30
+RAFRAICHISSEMENT_JOURS = 7   # fonds suivis via EODHD : ~150 fonds, 20 par jour
 
 db = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 cle = os.environ["EODHD_API_KEY"]

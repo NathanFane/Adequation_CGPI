@@ -98,7 +98,8 @@ def mettre_a_jour(db, cle: str, isins: list[str] | None = None, progression=None
         for i in range(0, len(lignes), 500):
             db.table("historique").upsert(lignes[i:i + 500], on_conflict="isin,date").execute()
 
-        maj = {"ticker_eodhd": ticker, "source_vl": "eodhd"}
+        maj = {"ticker_eodhd": ticker, "source_vl": "eodhd",
+               "derniere_maj": dt.datetime.now(dt.timezone.utc).isoformat()}
         if lignes:
             maj["derniere_vl"] = max(l["date"] for l in lignes)
             rapport["maj"].append((p["isin"], len(lignes)))
