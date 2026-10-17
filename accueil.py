@@ -25,6 +25,58 @@ def premier(valeur):
     return valeur.iloc[0] if isinstance(valeur, pd.Series) else valeur
 
 
+# ---------- Suppression en masse ----------
+
+def _retirer_liens(liens):
+    """Supprime des rattachements contrat-produit par lots (une requête par contrat et par 200 ISIN)."""
+    par_contrat = {}
+    for l in liens:
+        par_contrat.setdefault(l["contrat_id"], []).append(l["isin"])
+    for cid, isins in par_contrat.items():
+        for i in range(0, len(isins), 200):
+            db.table("contrat_produits").delete().eq("contrat_id", cid).in_("isin", isins[i:i + 200]).execute()
+
+
+def suppression_en_masse(vue: pd.DataFrame, contrats: pd.DataFrame):
+    """Retirer d'un coup les lignes affichées (selon les filtres), ou supprimer des contrats entiers."""
+    with st.expander("Suppression en masse"):
+        st.markdown(f"**Retirer de leurs contrats les {len(vue)} ligne(s) affichée(s)** "
+                    "(utilisez les filtres ci-dessus pour choisir lesquelles).")
+        ok1 = st.checkbox(f"Je confirme le retrait de {len(vue)} ligne(s)", key="confirme_retrait_masse")
+        if st.button("Retirer les lignes affichées", disabled=not ok1 or vue.empty):
+            liens = [{"contrat_id": int(l["contrat_id"]), "isin": l["ISIN"],
+                      "frais_specifiques": en_decimal(l["Frais spécifiques (%)"])} for _, l in vue.iterrows()]
+            with st.spinner("Retrait en cours…"):
+                _retirer_liens(liens)
+            st.session_state["dernier_enregistrement"] = {
+                "resume": f"{len(liens)} retrait(s) du contrat", "retraits": liens, "types": [], "indices": []}
+            st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+            st.rerun()
+
+        st.divider()
+        st.markdown("**Supprimer des contrats entiers** (le contrat et la liste de ses produits ; "
+                    "les fonds restent dans l'univers d'investissement).")
+        choix = st.multiselect("Contrats à supprimer", list(contrats["nom"]), key="contrats_a_supprimer")
+        ok2 = st.checkbox("Je confirme la suppression de ces contrats", key="confirme_suppression_contrats")
+        if st.button("Supprimer les contrats choisis", disabled=not (choix and ok2)):
+            supprimes = []
+            with st.spinner("Suppression en cours…"):
+                for _, c in contrats[contrats["nom"].isin(choix)].iterrows():
+                    liens = _tout(db.table("contrat_produits").select("isin, frais_specifiques")
+                                  .eq("contrat_id", int(c["id"])).order("isin"))
+                    contrat = {k: (None if pd.isna(c[k]) else (c[k].item() if hasattr(c[k], "item") else c[k])) for k in
+                               ("nom", "assureur", "frais_gestion_uc", "frais_gestion_euro",
+                                "frais_versement", "frais_arbitrage")}
+                    contrat["user_id"] = USER_ID
+                    supprimes.append((contrat, liens))
+                    db.table("contrats").delete().eq("id", int(c["id"])).eq("user_id", USER_ID).execute()
+            st.session_state["dernier_enregistrement"] = {
+                "resume": f"{len(supprimes)} contrat(s) supprimé(s)", "contrats_supprimes": supprimes,
+                "retraits": [], "types": [], "indices": []}
+            st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+            st.rerun()
+
+
 # ---------- Accès aux données ----------
 
 def mes_contrats() -> pd.DataFrame:
@@ -180,6 +232,34 @@ with onglet_import:
             st.warning("ISIN valides mais nom introuvable : " + ", ".join(r["introuvables"]))
 
 with onglet_liste:
+    # Annulation du dernier enregistrement
+    if precedent := st.session_state.get("dernier_enregistrement"):
+        c1, c2 = st.columns([4, 1])
+        c1.success(precedent["resume"] + " enregistré(s).")
+        if c2.button("Annuler", help="Rétablit la situation d'avant le dernier enregistrement"):
+            # Contrats supprimés : recréés (nouvel identifiant) avec leurs produits
+            for contrat, liens in precedent.get("contrats_supprimes", []):
+                nouvel_id = db.table("contrats").insert(contrat).execute().data[0]["id"]
+                for l in liens:
+                    l["contrat_id"] = nouvel_id
+                for i in range(0, len(liens), 500):
+                    db.table("contrat_produits").upsert(liens[i:i + 500], on_conflict="contrat_id,isin").execute()
+            retraits = precedent["retraits"]
+            for i in range(0, len(retraits), 500):
+                db.table("contrat_produits").upsert(retraits[i:i + 500], on_conflict="contrat_id,isin").execute()
+            for isin, type_avant in precedent["types"]:
+                db.table("produits").update({"type_produit": type_avant}).eq("isin", isin).execute()
+            for cid, isin, ancien in precedent.get("frais", []):
+                (db.table("contrat_produits").update({"frais_specifiques": ancien})
+                 .eq("contrat_id", cid).eq("isin", isin).execute())
+            for isin, maj in precedent["indices"]:
+                db.table("produits").update(maj).eq("isin", isin).execute()
+            if precedent["indices"]:
+                calculer_et_enregistrer(db, [i for i, _ in precedent["indices"]])
+            del st.session_state["dernier_enregistrement"]
+            st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
+            st.rerun()
+
     contrats = mes_contrats()
     if contrats.empty:
         st.info("Aucun contrat pour l'instant. Importez vos produits dans l'onglet 2.")
@@ -293,27 +373,10 @@ with onglet_liste:
         if df.empty:
             st.info("Aucun produit.")
         else:
-            # Annulation du dernier enregistrement
-            if precedent := st.session_state.get("dernier_enregistrement"):
-                c1, c2 = st.columns([4, 1])
-                c1.success(precedent["resume"] + " enregistré(s).")
-                if c2.button("Annuler", help="Rétablit la situation d'avant le dernier enregistrement"):
-                    for l in precedent["retraits"]:
-                        db.table("contrat_produits").upsert(l, on_conflict="contrat_id,isin").execute()
-                    for isin, type_avant in precedent["types"]:
-                        db.table("produits").update({"type_produit": type_avant}).eq("isin", isin).execute()
-                    for cid, isin, ancien in precedent.get("frais", []):
-                        (db.table("contrat_produits").update({"frais_specifiques": ancien})
-                         .eq("contrat_id", cid).eq("isin", isin).execute())
-                    for isin, maj in precedent["indices"]:
-                        db.table("produits").update(maj).eq("isin", isin).execute()
-                    if precedent["indices"]:
-                        calculer_et_enregistrer(db, [i for i, _ in precedent["indices"]])
-                    del st.session_state["dernier_enregistrement"]
-                    st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
-                    st.rerun()
-
-            st.caption(f"{len(df)} produit(s) · {(df['Statut'] == 'introuvable').sum()} introuvable(s) · "
+            suppression_en_masse(df, contrats)
+            st.caption(f"{len(df)} ligne(s) = {df['ISIN'].nunique()} produit(s) distinct(s) "
+                       "(un produit présent dans 3 contrats compte pour 3 lignes) · "
+                       f"{(df['Statut'] == 'introuvable').sum()} introuvable(s) · "
                        "cochez « Retirer du contrat » ou modifiez le type, l'indice ou les frais spécifiques, "
                        "puis enregistrez.")
             df = df.sort_values(["Contrat", "Nom"]).reset_index(drop=True)
@@ -378,7 +441,9 @@ with onglet_liste:
                 avant = df.set_index("ISIN")
                 precedent = {
                     "resume": resume,
-                    "retraits": [{"contrat_id": int(l["contrat_id"]), "isin": l["ISIN"]} for _, l in a_retirer.iterrows()],
+                    "retraits": [{"contrat_id": int(l["contrat_id"]), "isin": l["ISIN"],
+                                  "frais_specifiques": en_decimal(l["Frais spécifiques (%)"])}
+                                 for _, l in a_retirer.iterrows()],
                     "types": [(l["ISIN"], premier(avant.loc[l["ISIN"], "Type"])) for _, l in types_modifies.iterrows()],
                     "indices": [],
                     "frais": [(int(l["contrat_id"]), l["ISIN"], en_decimal(df.loc[i, "Frais spécifiques (%)"]))
