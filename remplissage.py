@@ -140,7 +140,6 @@ def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2800, journal=pr
         # Sans VL : seront retentés via EODHD les jours suivants, ou marqués introuvables
         rapport["en_attente"] = [s["isin"] for s in lot if s["isin"] not in trouves]
 
-    # Rattachement aux contrats de tous les produits suivis ayant des VL (aucun appel externe)
     # Rattachement aux contrats des seuls fonds ajoutés aujourd'hui : un contrat ou un produit que
     # l'utilisateur a supprimé n'est jamais recréé
     if rapport["ajoutes"]:
