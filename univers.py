@@ -147,5 +147,6 @@ else:
 
 st.divider()
 st.page_link("en_cours.py", label=f"Produits en cours de référencement ({len(incomplets)})", icon="⏳")
+st.page_link("page_indices.py", label="Indices de référence : composition, indicateurs et évolution", icon="📈")
 st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
 st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")
