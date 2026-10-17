@@ -2,7 +2,7 @@
 
 Ce fichier est lu automatiquement par Claude Code à l'ouverture du dépôt. Il résume tout ce qui a été
 décidé et construit. **À tenir à jour après chaque changement important.**
-Dernière mise à jour : 17 octobre 2026.
+Dernière mise à jour : 18 octobre 2026.
 
 ---
 
@@ -296,18 +296,25 @@ pour enrichir l'univers. Les SCPI ont souvent un code interne au lieu d'un ISIN 
 
 ## 11. Prochaines étapes / points ouverts
 
-1. **Méthodes d'allocation** (prochaine étape prévue). Idée de Nathan : un score pondéré, par ex.
+1. **Nouvelles métriques à ajouter** (sélection proposée le 18/10, à confirmer par Nathan avant de coder) :
+   R² (= corrélation²), bêta, alpha de Jensen, tracking error et ratio d'information (réserve : l'indice
+   est un proxy choisi par corrélation), Calmar (rendement ÷ max drawdown), frais totaux (fonds + contrat,
+   depuis `supports_contrat`), % de mois positifs, pire mois, pire année ; afficher aussi skewness et
+   kurtosis (déjà calculés dans `detail`). Écartés car redondants : Treynor, Omega, Sterling, Martin, Ulcer.
+   Les métriques de portefeuille (matrice de corrélation, contribution au risque, VaR du portefeuille)
+   seront calculées à l'étape d'allocation.
+2. **Méthodes d'allocation** (prochaine étape prévue). Idée de Nathan : un score pondéré, par ex.
    **SRI, Sharpe et coefficient de corrélation à 25 % chacun**. Questions encore ouvertes :
    - quel est le **4e critère** pour arriver à 100 % (frais totaux ? VaR ? max drawdown ?) ;
    - le SRI doit-il être un **critère du score** ou un **filtre** préalable selon le profil du client
      (plus conforme à la DDA) ;
    - proposition faite : décrire chaque méthode dans un fichier (critères, poids, sens, plafonds) ;
      matrice de corrélation calculée à la volée au moment de l'allocation.
-2. Questionnaire client, tables `clients` / `profils`, contrôle d'adéquation (marché cible EMT, SRI).
-3. Page de connexion (Supabase Auth) ; ensuite seulement partager le lien du site.
-4. Afficher les données EMT/EPT dans le tableau ; importer l'EET (SFDR) si un fichier est obtenu.
-5. Éventuellement : contrôle qualité en comparant la performance N-1 calculée à celle des listes
+3. Questionnaire client, tables `clients` / `profils`, contrôle d'adéquation (marché cible EMT, SRI).
+4. Page de connexion (Supabase Auth) ; ensuite seulement partager le lien du site.
+5. Afficher les données EMT/EPT dans le tableau ; importer l'EET (SFDR) si un fichier est obtenu.
+6. Éventuellement : contrôle qualité en comparant la performance N-1 calculée à celle des listes
    assureurs (proposé, Nathan l'a trouvé trop complexe pour l'instant).
-6. Réimport éventuel des 167 fonds « historique trop court » (voir §5).
-7. Mettre à jour les listes des assureurs quand de nouvelles versions sont disponibles (déposer le
+7. Réimport éventuel des 167 fonds « historique trop court » (voir §5).
+8. Mettre à jour les listes des assureurs quand de nouvelles versions sont disponibles (déposer le
    fichier dans le bon dossier ; la date de liste permet de suivre les changements de SRI).
