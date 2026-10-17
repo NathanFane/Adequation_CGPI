@@ -110,12 +110,16 @@ def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2800, journal=pr
         "frais_contrat, ouvert, avenant_requis"))
     produits = {p["isin"]: p for p in _tout(db.table("produits").select("isin, statut, derniere_vl"))}
     suivis = sum(p["statut"] == "valide" for p in produits.values())
+    try:   # fonds supprimés volontairement (migration 015) : jamais réimportés
+        exclus = {e["isin"] for e in _tout(db.table("fonds_exclus").select("isin").order("isin"))}
+    except Exception:
+        exclus = set()
 
     # Candidats : supports ouverts, sans avenant, jamais essayés, avec des VL de marché
     # (ni SCPI ni fonds à formule) ; un ISIN = sa ligne la plus complète
     par_isin = {}
     for s in supports:
-        if (s.get("ouvert") is False or s.get("avenant_requis") or s["isin"] in produits
+        if (s.get("ouvert") is False or s.get("avenant_requis") or s["isin"] in produits or s["isin"] in exclus
                 or s["type_produit"] != "fonds"   # fonds uniquement (ni actions, ni ETF, ni SCPI)
                 or classe_assureur(s.get("classification"), s["type_produit"]) == "structure"):
             continue
