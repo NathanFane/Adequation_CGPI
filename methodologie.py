@@ -4,6 +4,8 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
+from navigation import pied_de_page
+
 from base import USER_ID, db
 from calculs import (JOURS, MIN_POINTS, MIN_SEMAINES, correlations, detail, lire_historique, lire_indices,
                      rendements_references, taux_sans_risque)
@@ -235,3 +237,5 @@ st.markdown("""
 - **Indices de référence** : ce sont des approximations par ETF ; l'indice officiel du prospectus peut différer.
   Les indices Royaume-Uni et Suisse sont en devise locale.
 """)
+
+pied_de_page("methodologie.py")

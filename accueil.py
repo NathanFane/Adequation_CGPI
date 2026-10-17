@@ -4,6 +4,8 @@ import io
 import pandas as pd
 import streamlit as st
 
+from navigation import pied_de_page
+
 from calculs import calculer_et_enregistrer
 from collecte import _tout, actualiser
 from base import USER_ID, db
@@ -478,8 +480,4 @@ with onglet_liste:
                 st.rerun()
 
 
-# ---------- Pied de page ----------
-st.divider()
-st.page_link("univers.py", label="Univers d'investissement : tous les produits référencés", icon="🗂️")
-st.page_link("en_cours.py", label="Produits en cours de référencement", icon="⏳")
-st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")
+pied_de_page("accueil.py")

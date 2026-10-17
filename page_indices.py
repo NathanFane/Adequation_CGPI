@@ -4,6 +4,8 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
+from navigation import pied_de_page
+
 from base import db
 from calculs import lire_indices, metriques, taux_sans_risque
 from collecte import _tout
@@ -81,6 +83,4 @@ choix = st.multiselect("Indices à afficher", list(vue["Indice"]), default=list(
 if choix:
     st.line_chart(pd.DataFrame({n: series[n] for n in choix if len(series[n])}))
 
-st.divider()
-st.page_link("univers.py", label="Retour à l'univers d'investissement", icon="🗂️")
-st.page_link("methodologie.py", label="Méthodologie : détail du calcul des métriques", icon="📐")
+pied_de_page("page_indices.py")

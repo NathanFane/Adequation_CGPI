@@ -2,6 +2,8 @@
 import pandas as pd
 import streamlit as st
 
+from navigation import pied_de_page
+
 from base import db
 from collecte import _tout
 from remplissage import NOMS_CONTRATS
@@ -50,6 +52,4 @@ else:
         vue = vue[vue["Contrats"].apply(lambda v: any(c in v.split(", ") for c in f_contrat))]
     st.dataframe(vue.sort_values(["Raison", "Nom"]), hide_index=True, width="stretch", height=600)
 
-st.divider()
-st.page_link("univers.py", label="Univers d'investissement : produits complets", icon="🗂️")
-st.page_link("accueil.py", label="Retour à mes produits", icon="⬅️")
+pied_de_page("en_cours.py")
