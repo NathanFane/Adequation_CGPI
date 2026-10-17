@@ -141,9 +141,10 @@ def ajouter_nouveaux(db, cle, user_id, nombre=500, max_produits=2800, journal=pr
         rapport["en_attente"] = [s["isin"] for s in lot if s["isin"] not in trouves]
 
     # Rattachement aux contrats de tous les produits suivis ayant des VL (aucun appel externe)
-    avec_vl = {p["isin"] for p in _tout(db.table("produits").select("isin").eq("statut", "valide")
-                                        .not_.is_("derniere_vl", "null"))}
-    rattacher(db, user_id, supports, avec_vl & {s["isin"] for s in supports})
+    # Rattachement aux contrats des seuls fonds ajoutés aujourd'hui : un contrat ou un produit que
+    # l'utilisateur a supprimé n'est jamais recréé
+    if rapport["ajoutes"]:
+        rattacher(db, user_id, supports, set(rapport["ajoutes"]))
     classer(db, supports)
     journal(f"Nouveaux supports : {len(rapport['ajoutes'])} avec VL, {len(rapport['en_attente'])} en attente, "
             f"{rapport['restants']} restant(s) dans les listes"
