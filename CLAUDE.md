@@ -90,7 +90,8 @@ existe, sinon le seul profil de la table `utilisateurs`.
 - tableau éditable (`st.data_editor`) : une ligne = un couple (produit, contrat). Colonnes : Retirer du
   contrat, ISIN, Nom, Type (modifiable), Classe d'actifs, Zone, Contrat, Statut, VL jusqu'au, Mis à jour
   le, Source des VL, Indice de référence (modifiable : Automatique ou l'un des 54), Indice retenu, Frais
-  spécifiques (%) (modifiable), puis les métriques ;
+  spécifiques (%) (modifiable), Frais totaux (frais du fonds + frais spécifiques, sinon frais UC du contrat),
+  puis les métriques ;
 - compteur « N ligne(s) = M produit(s) distinct(s) » (un fonds dans 3 contrats = 3 lignes) ;
 - boutons « Enregistrer : résumé des changements » / « Annuler les modifications » ; clé d'éditeur
   versionnée `tableau_{version}`.
@@ -113,13 +114,14 @@ Contrat possible) ; noms et types via OpenFIGI.
 | Fichier | Contenu |
 |---|---|
 | `base.py` | Client Supabase en cache (secrets Streamlit), `USER_ID`, création du profil de test |
-| `calculs.py` | Métriques (voir §6) : `taux_sans_risque`, `detail`, `metriques`, `lire_historique`, `lire_indices`, `rendements_hebdo`, `rendements_references`, `correlations`, `calculer_et_enregistrer` |
+| `calculs.py` | Métriques (voir §6) : `taux_sans_risque`, `detail`, `metriques`, `relatif` (R², bêta, alpha, TE, IR), `lire_historique`, `lire_indices`, `rendements_hebdo`, `rendements_references`, `correlations`, `calculer_et_enregistrer` |
 | `collecte.py` | `executer` (requête avec reprise si connexion coupée), `_tout` (pagination 1000), EODHD (`mettre_a_jour`, quota), `actualiser` (Yahoo puis EODHD), `mettre_a_jour_indices` (yfinance) |
 | `yahoo.py` | Source principale des VL : `chercher` (ticker par ISIN), `nettoyer` (VL aberrantes), `mettre_a_jour` |
 | `indices.py` | 54 indices de référence (`REFERENCES`), `PAR_CODE`, `TICKERS`, `CLASSES`, `ZONES`, `SEUIL_ZONE = 0.7`, `classe_indice`, `zone_indice` |
 | `listes_assureurs.py` | Lecteurs des listes de supports (Excel, CSV, PDF) : un par assureur ; `classe_assureur` |
 | `remplissage.py` | Ajout automatique de fonds depuis les listes ; `classer` ; `rattacher` ; `NOMS_CONTRATS` |
 | `filtres.py` | Moteur des filtres ET/OU (`appliquer`, `decrire`, `valeurs_possibles`) |
+| `colonnes.py` | Colonnes de métriques communes à Mes produits et à l'Univers : `METRIQUES` (libellé → champ), `CONFIG` (format et bulle d'aide) |
 | `emt.py`, `ept.py` | Lecture des fichiers FinDatEx EMT V4 et EPT V21 (colonnes repérées par leur code à 5 chiffres) |
 | `openfigi.py` | Nom et type d'un ISIN via OpenFIGI (`TYPES = fonds, etf, action, obligation, scpi, autre`) |
 | `isin.py` | `normaliser`, `est_valide` (clé de Luhn), `extraire` (découpe un copier-coller) |
@@ -139,7 +141,7 @@ Variable `SIMULATION=1` : les scripts d'import lisent les fichiers sans rien éc
 
 ## 5. Base de données (Supabase)
 
-Schéma initial : `supabase/schema.sql`, puis migrations `002` à `016` (toutes exécutées par Nathan).
+Schéma initial : `supabase/schema.sql`, puis migrations `002` à `017` (`017` à exécuter par Nathan, les autres le sont).
 
 ### Tables
 | Table | Contenu |
@@ -160,7 +162,7 @@ Schéma initial : `supabase/schema.sql`, puis migrations `002` à `016` (toutes 
 |---|---|
 | `supports_contrat_actuels` | Dernière liste connue de chaque contrat |
 | `metriques_actuelles` | Dernier calcul de métriques de chaque produit |
-| `produits_complets` | Produits valides avec VL **et** métriques ; + contrats, assureurs, SRI (max si listes différentes), SFDR, frais du fonds (min), label ISR, `derniere_maj` |
+| `produits_complets` | Produits valides avec VL **et** métriques ; + contrats, assureurs, SRI (max si listes différentes), SFDR, frais du fonds (min), frais totaux (min des contrats de `coalesce(frais_totaux, frais_actif + frais_contrat)`), label ISR, `derniere_maj` |
 | `produits_incomplets` | Les autres, avec `raison` : introuvable / VL pas encore récupérées / historique < 6 mois ou métriques pas calculées |
 
 ### Migrations (ordre et but)
@@ -168,7 +170,8 @@ Schéma initial : `supabase/schema.sql`, puis migrations `002` à `016` (toutes 
 contrats · 008 EPT · 009 `supports_contrat` · 010 colonnes Yahoo · 011 classe d'actifs, zone,
 `metriques_actuelles` · 012 vues complets/incomplets + rechargement Yahoo · 013 nouvelle recherche des
 tickers Yahoo · 014 **fonds uniquement** (suppression actions, ETF, SCPI…) · 015 nettoyage (incomplets
-sauf 10 exemples, sans SRI, volatilité > 60 %) + `fonds_exclus` · 016 `derniere_maj`.
+sauf 10 exemples, sans SRI, volatilité > 60 %) + `fonds_exclus` · 016 `derniere_maj` · 017 nouvelles métriques
+(colonnes de `metriques`, vues `metriques_actuelles` et `produits_complets` + `frais_totaux`).
 
 ### État des données (17/10/2026)
 - **1 808 fonds complets** : 1 659 via Yahoo, 148 via EODHD, 1 en attente.
@@ -197,6 +200,12 @@ minimum **120 VL** (~6 mois) sinon pas de métrique.
 | Recouvrement (jours) | Du point bas au retour au plus haut précédent ; vide si pas encore revenu (normal) |
 | Sharpe, Sortino | Avec le taux sans risque = moyenne de l'**€STR** (BCE) sur la période |
 | Corrélation à l'indice | Rendements **hebdomadaires** (vendredi), ≥ 26 semaines communes ; indice retenu = le plus corrélé des 54, sauf choix manuel du CGPI |
+| R², bêta, alpha de Jensen, tracking error, ratio d'information | Contre l'indice retenu, mêmes rendements hebdomadaires communs ; rendements annualisés sur ces semaines (52/an) ; alpha = R_p − [r_f + β(R_i − r_f)] ; TE = σ(r_p − r_i)·√52 ; IR = (R_p − R_i)/TE. Réserve : indice choisi a posteriori |
+| Calmar | Rendement annuel ÷ max drawdown (même période, 5 ans au plus) |
+| Mois positifs, pire mois | Rendements mensuels de fin de mois (premier mois incomplet écarté) |
+| Pire année | Pire performance sur **12 mois glissants** (fins de mois) ; pas les années civiles (1re et dernière incomplètes) |
+| Skewness, kurtosis | Ceux de la VaR Cornish-Fisher (rendements log quotidiens ; kurtosis = excès) |
+| Frais totaux | Pas dans `metriques` : Univers = vue `produits_complets` ; Mes produits = frais du fonds + frais du contrat de l'utilisateur. Hors frais de versement/arbitrage |
 
 **Classe d'actifs** : d'abord la classification de l'assureur (mots-clés, `classe_assureur`), sinon la
 catégorie de l'indice le plus corrélé si corrélation ≥ 0,7. Valeurs : monetaire, obligations, actions,
@@ -296,13 +305,9 @@ pour enrichir l'univers. Les SCPI ont souvent un code interne au lieu d'un ISIN 
 
 ## 11. Prochaines étapes / points ouverts
 
-1. **Nouvelles métriques à ajouter** (sélection proposée le 18/10, à confirmer par Nathan avant de coder) :
-   R² (= corrélation²), bêta, alpha de Jensen, tracking error et ratio d'information (réserve : l'indice
-   est un proxy choisi par corrélation), Calmar (rendement ÷ max drawdown), frais totaux (fonds + contrat,
-   depuis `supports_contrat`), % de mois positifs, pire mois, pire année ; afficher aussi skewness et
-   kurtosis (déjà calculés dans `detail`). Écartés car redondants : Treynor, Omega, Sterling, Martin, Ulcer.
-   Les métriques de portefeuille (matrice de corrélation, contribution au risque, VaR du portefeuille)
-   seront calculées à l'étape d'allocation.
+1. **Nouvelles métriques** : codées le 18/10 (voir §6), migration `017` à exécuter. Écartés car redondants :
+   Treynor, Omega, Sterling, Martin, Ulcer. Les métriques de portefeuille (matrice de corrélation,
+   contribution au risque, VaR du portefeuille) seront calculées à l'étape d'allocation.
 2. **Méthodes d'allocation** (prochaine étape prévue). Idée de Nathan : un score pondéré, par ex.
    **SRI, Sharpe et coefficient de corrélation à 25 % chacun**. Questions encore ouvertes :
    - quel est le **4e critère** pour arriver à 100 % (frais totaux ? VaR ? max drawdown ?) ;

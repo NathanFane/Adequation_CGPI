@@ -8,7 +8,7 @@ from navigation import pied_de_page, retour_en_haut
 
 from base import USER_ID, db
 from calculs import (JOURS, MIN_POINTS, MIN_SEMAINES, correlations, detail, lire_historique, lire_indices,
-                     rendements_references, taux_sans_risque)
+                     relatif, rendements_references, taux_sans_risque)
 from indices import PAR_CODE, REFERENCES, SEUIL_ZONE
 
 
@@ -99,6 +99,26 @@ st.markdown("Pire baisse subie entre un plus haut et le point bas qui suit. Le *
             "est le nombre de jours entre ce point bas et le retour au plus haut précédent ; "
             "il reste vide si le produit n'est pas encore revenu à ce niveau.")
 
+st.subheader("Ratio de Calmar")
+st.latex(r"\text{Calmar} = \frac{R}{\text{Max Drawdown}}")
+st.markdown("Rendement annuel obtenu par unité de pire baisse : plus il est élevé, mieux la performance "
+            "compense les pertes subies. Calculé sur la même période que les autres métriques (5 ans au plus).")
+
+st.subheader("Mois positifs, pire mois, pire année")
+st.markdown("""
+- Rendements **mensuels** calculés sur les VL de fin de mois ; le premier mois, incomplet, est écarté.
+- **Mois positifs** : part des mois terminés en hausse.
+- **Pire mois** : plus mauvaise performance sur un mois civil.
+- **Pire année** : plus mauvaise performance sur **12 mois glissants** (d'une fin de mois à la même fin de mois
+  un an plus tard). Les années civiles n'ont pas été retenues : avec 5 ans d'historique, la première et la
+  dernière sont incomplètes. Vide si l'historique fait moins de 12 mois.
+""")
+
+st.subheader("Skewness et kurtosis")
+st.markdown("Ce sont les paramètres $S$ et $K$ de la VaR Cornish-Fisher ci-dessus, affichés tels quels : "
+            "une skewness négative signale des baisses plus fortes que les hausses ; un excès de kurtosis "
+            "élevé, des pertes extrêmes plus fréquentes que la loi normale (0 pour une loi normale).")
+
 st.subheader("Corrélation à l'indice de référence")
 st.latex(r"\rho = \frac{\text{cov}(R^{hebdo}_{produit},\,R^{hebdo}_{indice})}{\sigma_{produit}\,\sigma_{indice}}")
 st.markdown(f"""
@@ -109,6 +129,24 @@ st.markdown(f"""
   Le CGPI peut en imposer un autre dans le tableau.
 - Chaque indice est représenté par un ETF (cours dividendes réinvestis, source Yahoo Finance) ;
   les indices mixtes combinent plusieurs ETF, rééquilibrés chaque semaine.
+""")
+st.subheader("Mesures relatives à l'indice retenu")
+st.markdown(f"Sur les mêmes **rendements hebdomadaires** que la corrélation (au moins {MIN_SEMAINES} semaines communes). "
+            "$R_p$ et $R_i$ : rendements annualisés du produit et de l'indice sur les semaines communes ; "
+            "$r_f$ : taux sans risque.")
+st.latex(r"R^2 = \rho^2 \qquad \beta = \frac{\text{cov}(r_p,\,r_i)}{\text{var}(r_i)}")
+st.latex(r"\alpha = R_p - \left[r_f + \beta\,(R_i - r_f)\right]")
+st.latex(r"TE = \sigma(r_p - r_i) \times \sqrt{52} \qquad IR = \frac{R_p - R_i}{TE}")
+st.markdown("""
+- **R²** : part des variations du produit expliquée par l'indice (0,9 = 90 %). Un R² faible rend le bêta,
+  l'alpha et le ratio d'information peu significatifs.
+- **Bêta** : sensibilité à l'indice ; 1,2 = le produit varie en moyenne de 1,2 % quand l'indice varie de 1 %.
+- **Alpha de Jensen** : rendement annuel au-delà de ce qu'explique l'exposition à l'indice (le bêta).
+- **Tracking error** : volatilité de l'écart de performance avec l'indice ; faible pour un fonds indiciel.
+- **Ratio d'information** : surperformance annuelle par unité de tracking error ; il mesure la régularité
+  de la surperformance du gérant.
+- **Réserve** : l'indice est celui qui ressemble le plus au produit (ou celui choisi par le CGPI), pas forcément
+  l'indice officiel du prospectus. Ces mesures comparent donc le produit à un indice proche, choisi a posteriori.
 """)
 st.subheader("Classe d'actifs et zone géographique")
 st.markdown(f"""
@@ -223,6 +261,44 @@ else:
                                        "Corrélation": corr.values[:10].round(3)}),
                          hide_index=True, width="stretch")
 
+        st.subheader("Étape 8 : mesures relatives à l'indice retenu")
+        produit = db.table("produits").select("indice_reference, indice_manuel").eq("isin", isin).execute().data
+        code = (produit[0]["indice_reference"] if produit and produit[0]["indice_manuel"]
+                else (corr.index[0] if len(corr) else None))
+        refs = rendements_references(lire_indices(db)) if code else pd.DataFrame()
+        rel = relatif(vl, refs[code], rf) if code in refs.columns else None
+        if rel is None:
+            st.info(f"Non calculables : il faut au moins {MIN_SEMAINES} semaines communes avec l'indice retenu.")
+        else:
+            st.markdown(f"""
+Indice retenu : **{PAR_CODE[code]['nom']}**, {rel['nb_semaines']} semaines communes
+(du {rel['debut']:%d/%m/%Y} au {rel['fin']:%d/%m/%Y}).
+
+| | Valeur |
+|---|---|
+| $R_p$ (produit, annualisé) | {pct(rel['rendement_produit'])} |
+| $R_i$ (indice, annualisé) | {pct(rel['rendement_indice'])} |
+| $\\rho$ | {nb(rel['correlation'], 3)} |
+""")
+            st.latex(rf"R^2 = ({tnb(rel['correlation'], 3)})^2 = {tnb(rel['r2'], 3)}")
+            st.latex(rf"\beta = {tnb(rel['beta'], 3)}")
+            st.latex(rf"\alpha = {tpct(rel['rendement_produit'])} - \left[{tpct(rel['rf'], 3)} + {tnb(rel['beta'], 3)}"
+                     rf" \times ({tpct(rel['rendement_indice'])} - {tpct(rel['rf'], 3)})\right] = {tpct(rel['alpha'])}")
+            st.latex(rf"TE = {tpct(rel['tracking_error'])} \qquad IR = \frac{{{tpct(rel['rendement_produit'])} - "
+                     rf"({tpct(rel['rendement_indice'])})}}{{{tpct(rel['tracking_error'])}}} = {tnb(rel['ratio_information'], 2)}")
+
+        st.subheader("Étape 9 : Calmar, mois et années")
+        if d["calmar"] is not None:
+            st.latex(rf"\text{{Calmar}} = \frac{{{tpct(d['rendement'])}}}{{{tpct(d['max_drawdown'])}}} = {tnb(d['calmar'], 2)}")
+        st.markdown(f"""
+| | Valeur |
+|---|---|
+| Mois positifs | {d['nb_mois_positifs']} sur {d['nb_mois']} = {pct(d['pct_mois_positifs'], 1)} |
+| Pire mois | {pct(d['pire_mois'])}{f" ({d['date_pire_mois']:%m/%Y})" if d['date_pire_mois'] else ""} |
+| Pire année (12 mois glissants) | {pct(d['pire_annee'])}{f" (12 mois finissant en {d['fin_pire_annee']:%m/%Y})" if d['fin_pire_annee'] else " (historique inférieur à 12 mois)"} |
+| Skewness / kurtosis | {nb(d['skew'], 2)} / {nb(d['kurt'], 2)} (voir étape 3) |
+""")
+
 # ---------- 4. Limites ----------
 st.header("4. Limites")
 st.markdown("""
@@ -234,6 +310,10 @@ st.markdown("""
 - **Données Yahoo Finance** : source non officielle ; certains jours de VL manquent, le rendement suivant couvre
   alors deux jours, ce qui peut légèrement fausser la volatilité et la VaR.
 - **Listes des assureurs** datées (juillet et novembre 2025) : SRI et frais ont pu évoluer depuis.
+- **Bêta, alpha, tracking error, ratio d'information** : mesurés contre l'indice le plus ressemblant, choisi
+  a posteriori ; si le R² est faible, ces chiffres ont peu de sens.
+- **Frais totaux** : frais du fonds + frais de gestion du contrat, d'après les listes des assureurs (et les frais
+  saisis pour vos contrats dans « Mes produits ») ; les frais de versement et d'arbitrage ne sont pas inclus.
 - **Indices de référence** : ce sont des approximations par ETF ; l'indice officiel du prospectus peut différer.
   Les indices Royaume-Uni et Suisse sont en devise locale.
 """)

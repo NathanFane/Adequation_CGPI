@@ -11,9 +11,11 @@ import pandas as pd
 # Indicateurs filtrables : nom de colonne -> type ("liste" ou "nombre") ; pourcent = saisie en %
 LISTES = ["Classe d'actifs", "Zone", "Contrats", "Type", "SFDR", "Label ISR"]
 NOMBRES = {  # colonne: (en pourcentage ?)
-    "SRI": False, "Frais du fonds": True, "Rendement annuel": True, "Volatilité": True,
-    "VaR 97,5 % 1 an": True, "Max Drawdown": True, "Sharpe": False, "Sortino": False,
-    "Corrélation à l'indice": False,
+    "SRI": False, "Frais du fonds": True, "Frais totaux": True, "Rendement annuel": True, "Volatilité": True,
+    "VaR 97,5 % 1 an": True, "Max Drawdown": True, "Pire mois": True, "Pire année": True,
+    "Mois positifs": True, "Sharpe": False, "Sortino": False, "Calmar": False,
+    "Corrélation à l'indice": False, "R²": False, "Bêta": False, "Alpha": True, "Tracking error": True,
+    "Ratio d'information": False, "Skewness": False, "Kurtosis": False,
 }
 EGAL, DIFFERENT = "égal à l'une des valeurs suivantes", "différent des valeurs suivantes"
 DANS_UN, DANS_TOUS, ABSENT = ("présent dans l'un des contrats suivants", "présent dans tous les contrats suivants",

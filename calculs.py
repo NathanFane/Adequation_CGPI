@@ -4,7 +4,9 @@ Conventions :
 - rendements quotidiens simples, 252 jours de bourse par an ;
 - VaR Cornish-Fisher à 97,5 % sur 1 an, selon la formule PRIIPs (règlement délégué 2017/653),
   exprimée en perte positive (0,12 = perte de 12 %) ;
-- taux sans risque : moyenne de l'€STR sur la période (BCE).
+- taux sans risque : moyenne de l'€STR sur la période (BCE) ;
+- mesures relatives à l'indice (R², bêta, alpha, tracking error, ratio d'information) sur les
+  rendements hebdomadaires, comme la corrélation.
 """
 import datetime as dt
 import io
@@ -76,6 +78,12 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
     baisse = np.minimum(r - rf_jour, 0)
     vol_baisse = math.sqrt((baisse ** 2).mean()) * math.sqrt(JOURS)
 
+    # Rendements mensuels (fin de mois ; le premier mois, incomplet, est écarté)
+    fin_mois = vl.resample("ME").last()
+    r_mois = fin_mois.pct_change().dropna()
+    # Pire année : pire performance sur 12 mois glissants (fins de mois)
+    r_12m = (fin_mois / fin_mois.shift(12) - 1).dropna()
+
     return {
         "debut": vl.index[0].date(), "fin": vl.index[-1].date(), "nb_vl": len(vl), "nb_rendements": len(r),
         "vl_debut": float(vl.iloc[0]), "vl_fin": float(vl.iloc[-1]), "annees": annees,
@@ -90,6 +98,41 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
         "rf": rf, "rf_jour": rf_jour, "nb_baisse": int((baisse < 0).sum()), "vol_baisse": float(vol_baisse),
         "sharpe": float((rendement - rf) / vol) if vol else None,
         "sortino": float((rendement - rf) / vol_baisse) if vol_baisse else None,
+        "calmar": float(rendement / max_dd) if max_dd else None,
+        "nb_mois": len(r_mois), "nb_mois_positifs": int((r_mois > 0).sum()),
+        "pct_mois_positifs": float((r_mois > 0).mean()) if len(r_mois) else None,
+        "pire_mois": float(r_mois.min()) if len(r_mois) else None,
+        "date_pire_mois": r_mois.idxmin().date() if len(r_mois) else None,
+        "pire_annee": float(r_12m.min()) if len(r_12m) else None,
+        "fin_pire_annee": r_12m.idxmin().date() if len(r_12m) else None,
+    }
+
+
+def relatif(vl: pd.Series, indice: pd.Series, rf: float | None) -> dict | None:
+    """Mesures par rapport à l'indice retenu, sur les rendements hebdomadaires communes
+    (au moins 26 semaines). `indice` = rendements hebdomadaires de l'indice. None si insuffisant."""
+    if vl.empty or indice is None or indice.empty:
+        return None
+    paire = pd.concat([rendements_hebdo(vl.dropna().sort_index()).rename("p"), indice.rename("i")],
+                      axis=1, join="inner").dropna()
+    n = len(paire)
+    if n < MIN_SEMAINES:
+        return None
+    rf = rf or 0.0
+    p, i = paire["p"], paire["i"]
+    rho = p.corr(i)
+    beta = p.cov(i) / i.var() if i.var() else None
+    # Rendements annualisés sur les semaines communes (52 semaines par an)
+    r_p = float((1 + p).prod() ** (52 / n) - 1)
+    r_i = float((1 + i).prod() ** (52 / n) - 1)
+    alpha = r_p - (rf + beta * (r_i - rf)) if beta is not None else None
+    te = float((p - i).std() * math.sqrt(52))
+    return {
+        "nb_semaines": n, "debut": paire.index[0].date(), "fin": paire.index[-1].date(),
+        "rendement_produit": r_p, "rendement_indice": r_i, "rf": rf,
+        "correlation": float(rho), "r2": float(rho ** 2), "beta": float(beta) if beta is not None else None,
+        "alpha": float(alpha) if alpha is not None else None, "tracking_error": te,
+        "ratio_information": float((r_p - r_i) / te) if te else None,
     }
 
 
@@ -107,7 +150,17 @@ def metriques(vl: pd.Series, rf: float | None) -> dict | None:
         "volatilite": round(d["volatilite"], 6),
         "sharpe": round(d["sharpe"], 4) if d["sharpe"] is not None else None,
         "sortino": round(d["sortino"], 4) if d["sortino"] is not None else None,
+        "calmar": _arrondi(d["calmar"], 4),
+        "pct_mois_positifs": _arrondi(d["pct_mois_positifs"], 4),
+        "pire_mois": _arrondi(d["pire_mois"], 6),
+        "pire_annee": _arrondi(d["pire_annee"], 6),
+        "skewness": _arrondi(d["skew"], 4),
+        "kurtosis": _arrondi(d["kurt"], 4),
     }
+
+
+def _arrondi(x, d):
+    return None if x is None or not math.isfinite(x) else round(x, d)
 
 
 def lire_historique(db, isin: str, depuis: dt.date) -> pd.Series:
@@ -237,6 +290,9 @@ def calculer_et_enregistrer(db, isins: list[str] | None = None, annees: int = 5)
             executer(db.table("produits").update(maj).eq("isin", p["isin"]))
         m["indice_reference"] = indice
         m["correlation_indice"] = round(rho, 4) if rho is not None else None
+        rel = relatif(vl, refs[indice], rf) if indice in refs.columns else None
+        for champ, d in (("r2", 4), ("beta", 4), ("alpha", 6), ("tracking_error", 6), ("ratio_information", 4)):
+            m[champ] = _arrondi(rel[champ], d) if rel and rel[champ] is not None else None
         lignes.append({"isin": p["isin"], "date_calcul": dt.date.today().isoformat(), **m})
         rapport["calcules"].append(p["isin"])
     for i in range(0, len(lignes), 500):

@@ -9,6 +9,7 @@ from collecte import _tout
 from indices import PAR_CODE, ZONES
 from remplissage import NOMS_CONTRATS
 import filtres as F
+from colonnes import CONFIG, METRIQUES
 
 NOMS_CLASSES = {"monetaire": "Monétaire", "obligations": "Obligations", "actions": "Actions", "mixte": "Mixte",
                 "immobilier": "Immobilier", "matieres_premieres": "Matières premières",
@@ -108,14 +109,9 @@ df = pd.DataFrame([{
     "SFDR": f"Article {p['sfdr']}" if p["sfdr"] else None,
     "Label ISR": p["label_isr"],
     "Frais du fonds": p["frais_actif"],
-    "Rendement annuel": p["rendement_annuel"],
-    "Volatilité": p["volatilite"],
-    "VaR 97,5 % 1 an": p["var_cf"],
-    "Max Drawdown": p["max_drawdown"],
-    "Sharpe": p["sharpe"],
-    "Sortino": p["sortino"],
+    "Frais totaux": p.get("frais_totaux"),
     "Indice retenu": PAR_CODE.get(p["indice_reference"], {}).get("nom"),
-    "Corrélation à l'indice": p["correlation_indice"],
+    **{libelle: p.get(champ) for libelle, champ in METRIQUES.items()},
     "VL jusqu'au": p["derniere_vl"],
     "Mis à jour le": (p.get("derniere_maj") or "")[:10] or None,
     "Source des VL": {"yahoo": "Yahoo Finance", "eodhd": "EODHD"}.get(p["source_vl"]),
@@ -135,15 +131,7 @@ else:
         vue.sort_values(["Classe d'actifs", "Nom"], na_position="last"),
         hide_index=True, width="stretch", height=600,
         column_config={
-            "Frais du fonds": st.column_config.NumberColumn(format="percent"),
-            "Rendement annuel": st.column_config.NumberColumn(format="percent"),
-            "Volatilité": st.column_config.NumberColumn(format="percent"),
-            "VaR 97,5 % 1 an": st.column_config.NumberColumn(
-                format="percent", help="Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)"),
-            "Max Drawdown": st.column_config.NumberColumn(format="percent"),
-            "Sharpe": st.column_config.NumberColumn(format="%.2f"),
-            "Sortino": st.column_config.NumberColumn(format="%.2f"),
-            "Corrélation à l'indice": st.column_config.NumberColumn(format="%.2f"),
+            **CONFIG,
             "SRI": st.column_config.NumberColumn(help="Indicateur synthétique de risque (1 à 7) publié par l'assureur"),
         },
     )

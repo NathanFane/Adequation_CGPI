@@ -7,6 +7,7 @@ import streamlit as st
 from navigation import pied_de_page
 
 from calculs import calculer_et_enregistrer
+from colonnes import CONFIG, METRIQUES as COLONNES_METRIQUES
 from collecte import _tout, actualiser
 from base import USER_ID, db
 from isin import est_valide, extraire, normaliser
@@ -358,17 +359,24 @@ with onglet_liste:
         # Dernières métriques de chaque produit
         mes_isins = set(df["ISIN"])
         dernieres = {m["isin"]: m for m in _tout(
-            db.table("metriques_actuelles").select("isin, date_calcul, rendement_annuel, volatilite, var_cf, cvar, "
-                                                   "max_drawdown, recouvrement_jours, sharpe, sortino, "
-                                                   "correlation_indice").order("isin"))
-            if m["isin"] in mes_isins}
-        COLONNES_METRIQUES = {
-            "Rendement annuel": "rendement_annuel", "Volatilité": "volatilite", "VaR 97,5 % 1 an": "var_cf",
-            "CVaR 1 jour": "cvar", "Max Drawdown": "max_drawdown", "Recouvrement (jours)": "recouvrement_jours",
-            "Sharpe": "sharpe", "Sortino": "sortino", "Corrélation à l'indice": "correlation_indice",
-        }
+            db.table("metriques_actuelles").select("isin, date_calcul, " + ", ".join(COLONNES_METRIQUES.values()))
+            .order("isin")) if m["isin"] in mes_isins}
         for colonne, champ in COLONNES_METRIQUES.items():
             df[colonne] = df["ISIN"].map(lambda i, c=champ: (dernieres.get(i) or {}).get(c))
+
+        # Frais totaux de chaque ligne : frais du fonds + frais spécifiques du support, sinon frais UC du contrat
+        frais_fonds = {p["isin"]: p["frais_actif"] for p in _tout(
+            db.table("produits_complets").select("isin, frais_actif").order("isin")) if p["isin"] in mes_isins}
+        frais_uc = dict(zip(contrats["id"], contrats["frais_gestion_uc"]))
+
+        def frais_totaux(ligne):
+            fonds = frais_fonds.get(ligne["ISIN"])
+            contrat = en_decimal(ligne["Frais spécifiques (%)"])
+            if contrat is None:
+                contrat = frais_uc.get(ligne["contrat_id"])
+            return None if fonds is None or contrat is None or pd.isna(contrat) else float(fonds) + float(contrat)
+        df.insert(df.columns.get_loc("Rendement annuel"), "Frais totaux",
+                  [frais_totaux(l) for _, l in df.iterrows()])
 
         f1, f2, f3, f4 = st.columns(4)
         filtre = f1.multiselect("Filtrer par contrat", list(contrats["nom"]))
@@ -398,7 +406,7 @@ with onglet_liste:
                 df,
                 hide_index=True, width="stretch",
                 disabled=["ISIN", "Nom", "Classe d'actifs", "Zone", "Contrat", "Statut", "VL jusqu'au", "Mis à jour le",
-                          "Source des VL", "Indice retenu",
+                          "Source des VL", "Indice retenu", "Frais totaux",
                           *COLONNES_METRIQUES],
                 column_config={
                     "contrat_id": None,
@@ -407,27 +415,13 @@ with onglet_liste:
                     "Zone": st.column_config.TextColumn(
                         help="Zone de l'indice le plus corrélé ; « Indéterminée » si la corrélation est inférieure à 0,7"),
                     "Type": st.column_config.SelectboxColumn("Type", options=TYPES),
-                    "VaR 97,5 % 1 an": st.column_config.NumberColumn(
-                        help="Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)",
-                        format="percent"),
-                    "Volatilité": st.column_config.NumberColumn(help="Volatilité annualisée", format="percent"),
-                    "Rendement annuel": st.column_config.NumberColumn(format="percent"),
-                    "CVaR 1 jour": st.column_config.NumberColumn(
-                        help="Perte moyenne lors des 2,5 % pires jours", format="percent"),
-                    "Max Drawdown": st.column_config.NumberColumn(
-                        help="Pire baisse depuis un plus haut", format="percent"),
-                    "Recouvrement (jours)": st.column_config.NumberColumn(
-                        help="Jours entre le point bas et le retour au plus haut (vide : pas encore revenu)"),
-                    "Sharpe": st.column_config.NumberColumn(format="%.2f"),
-                    "Sortino": st.column_config.NumberColumn(format="%.2f"),
+                    **{c: v for c, v in CONFIG.items() if c in df.columns},
                     "Indice de référence": st.column_config.SelectboxColumn(
                         options=NOMS_INDICES, width="medium",
                         help="Automatique : l'indice le plus corrélé au produit. Vous pouvez en imposer un."),
                     "Frais spécifiques (%)": st.column_config.NumberColumn(
                         min_value=0, max_value=20, format="%.2f",
                         help="À remplir seulement si ce support est facturé différemment des autres UC du contrat"),
-                    "Corrélation à l'indice": st.column_config.NumberColumn(
-                        help="Corrélation des rendements hebdomadaires avec l'indice retenu", format="%.2f"),
                 },
                 key=f"tableau_{st.session_state.get('version_tableau', 0)}",
             )
