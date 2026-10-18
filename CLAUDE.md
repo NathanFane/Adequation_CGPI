@@ -141,7 +141,7 @@ Variable `SIMULATION=1` : les scripts d'import lisent les fichiers sans rien éc
 
 ## 5. Base de données (Supabase)
 
-Schéma initial : `supabase/schema.sql`, puis migrations `002` à `017` (`017` à exécuter par Nathan, les autres le sont).
+Schéma initial : `supabase/schema.sql`, puis migrations `002` à `017` (toutes exécutées par Nathan).
 
 ### Tables
 | Table | Contenu |
@@ -305,7 +305,7 @@ pour enrichir l'univers. Les SCPI ont souvent un code interne au lieu d'un ISIN 
 
 ## 11. Prochaines étapes / points ouverts
 
-1. **Nouvelles métriques** : codées le 18/10 (voir §6), migration `017` à exécuter. Écartés car redondants :
+1. **Nouvelles métriques** : codées le 18/10 (voir §6), migration `017` exécutée. Écartés car redondants :
    Treynor, Omega, Sterling, Martin, Ulcer. Les métriques de portefeuille (matrice de corrélation,
    contribution au risque, VaR du portefeuille) seront calculées à l'étape d'allocation.
 2. **Méthodes d'allocation** (prochaine étape prévue). Idée de Nathan : un score pondéré, par ex.
