@@ -99,6 +99,15 @@ st.markdown("Pire baisse subie entre un plus haut et le point bas qui suit. Le *
             "est le nombre de jours entre ce point bas et le retour au plus haut précédent ; "
             "il reste vide si le produit n'est pas encore revenu à ce niveau.")
 
+st.subheader("Performances 3 mois, 6 mois, 1 an et historique disponible")
+st.latex(r"\text{Perf}_{n\,mois} = \frac{VL_{fin}}{VL_{fin - n\,mois}} - 1")
+st.markdown("""
+- De la dernière VL à la VL de la même date $n$ mois plus tôt (ou la dernière VL connue avant cette date).
+  Vide si l'historique ne remonte pas assez loin.
+- **Historique (ans)** : durée couverte par les VL utilisées, **5 ans au plus** (période de calcul) et 1 an pour
+  les fonds suivis via EODHD. Un fonds plus ancien affiche donc 5 ; la date de création réelle n'est pas connue.
+""")
+
 st.subheader("Ratio de Calmar")
 st.latex(r"\text{Calmar} = \frac{R}{\text{Max Drawdown}}")
 st.markdown("Rendement annuel obtenu par unité de pire baisse : plus il est élevé, mieux la performance "
@@ -296,6 +305,8 @@ Indice retenu : **{PAR_CODE[code]['nom']}**, {rel['nb_semaines']} semaines commu
 | Mois positifs | {d['nb_mois_positifs']} sur {d['nb_mois']} = {pct(d['pct_mois_positifs'], 1)} |
 | Pire mois | {pct(d['pire_mois'])}{f" ({d['date_pire_mois']:%m/%Y})" if d['date_pire_mois'] else ""} |
 | Pire année (12 mois glissants) | {pct(d['pire_annee'])}{f" (12 mois finissant en {d['fin_pire_annee']:%m/%Y})" if d['fin_pire_annee'] else " (historique inférieur à 12 mois)"} |
+| Perf 3 mois / 6 mois / 1 an | {pct(d['perf_3m'])} / {pct(d['perf_6m'])} / {pct(d['perf_1an'])} |
+| Historique disponible | {nb(d['historique_annees'], 1)} an(s) |
 | Skewness / kurtosis | {nb(d['skew'], 2)} / {nb(d['kurt'], 2)} (voir étape 3) |
 """)
 

@@ -373,7 +373,7 @@ with onglet_liste:
             if contrat is None:
                 contrat = frais_uc.get(ligne["contrat_id"])
             return None if fonds is None or contrat is None or pd.isna(contrat) else float(fonds) + float(contrat)
-        df.insert(df.columns.get_loc("Rendement annuel"), "Frais totaux",
+        df.insert(df.columns.get_loc(next(iter(COLONNES_METRIQUES))), "Frais totaux",
                   [frais_totaux(l) for _, l in df.iterrows()])
 
         f1, f2, f3, f4 = st.columns(4)

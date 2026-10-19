@@ -84,6 +84,14 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
     # Pire année : pire performance sur 12 mois glissants (fins de mois)
     r_12m = (fin_mois / fin_mois.shift(12) - 1).dropna()
 
+    # Performances sur 3 mois, 6 mois et 1 an : de la VL à la même date n mois plus tôt
+    # (ou à la dernière VL connue avant) ; vide si l'historique ne remonte pas assez loin
+    def perf(mois):
+        depart = vl.index[-1] - pd.DateOffset(months=mois)
+        if vl.index[0] > depart:
+            return None
+        return float(vl.iloc[-1] / vl.loc[:depart].iloc[-1] - 1)
+
     return {
         "debut": vl.index[0].date(), "fin": vl.index[-1].date(), "nb_vl": len(vl), "nb_rendements": len(r),
         "vl_debut": float(vl.iloc[0]), "vl_fin": float(vl.iloc[-1]), "annees": annees,
@@ -105,6 +113,8 @@ def detail(vl: pd.Series, rf: float | None) -> dict | None:
         "date_pire_mois": r_mois.idxmin().date() if len(r_mois) else None,
         "pire_annee": float(r_12m.min()) if len(r_12m) else None,
         "fin_pire_annee": r_12m.idxmin().date() if len(r_12m) else None,
+        "perf_3m": perf(3), "perf_6m": perf(6), "perf_1an": perf(12),
+        "historique_annees": (vl.index[-1] - vl.index[0]).days / 365.25,
     }
 
 
@@ -156,6 +166,10 @@ def metriques(vl: pd.Series, rf: float | None) -> dict | None:
         "pire_annee": _arrondi(d["pire_annee"], 6),
         "skewness": _arrondi(d["skew"], 4),
         "kurtosis": _arrondi(d["kurt"], 4),
+        "perf_3m": _arrondi(d["perf_3m"], 6),
+        "perf_6m": _arrondi(d["perf_6m"], 6),
+        "perf_1an": _arrondi(d["perf_1an"], 6),
+        "historique_annees": _arrondi(d["historique_annees"], 1),
     }
 
 

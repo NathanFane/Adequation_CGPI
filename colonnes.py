@@ -3,6 +3,8 @@ import streamlit as st
 
 # Libellé affiché -> champ des vues metriques_actuelles / produits_complets
 METRIQUES = {
+    "Historique (ans)": "historique_annees",
+    "Perf 3 mois": "perf_3m", "Perf 6 mois": "perf_6m", "Perf 1 an": "perf_1an",
     "Rendement annuel": "rendement_annuel", "Volatilité": "volatilite", "VaR 97,5 % 1 an": "var_cf",
     "CVaR 1 jour": "cvar", "Max Drawdown": "max_drawdown", "Recouvrement (jours)": "recouvrement_jours",
     "Pire mois": "pire_mois", "Pire année": "pire_annee", "Mois positifs": "pct_mois_positifs",
@@ -24,6 +26,12 @@ def _nb(aide=None):
 CONFIG = {
     "Frais du fonds": _pct("Frais de gestion du fonds (le plus bas des listes des assureurs)"),
     "Frais totaux": _pct("Frais du fonds + frais de gestion du contrat"),
+    "Historique (ans)": st.column_config.NumberColumn(
+        help="Années de VL disponibles pour les calculs (5 ans au plus ; 1 an pour les fonds suivis via EODHD)",
+        format="%.1f"),
+    "Perf 3 mois": _pct("Performance sur les 3 derniers mois"),
+    "Perf 6 mois": _pct("Performance sur les 6 derniers mois"),
+    "Perf 1 an": _pct("Performance sur les 12 derniers mois"),
     "Rendement annuel": _pct("Rendement annualisé sur la période (5 ans au plus)"),
     "Volatilité": _pct("Volatilité annualisée"),
     "VaR 97,5 % 1 an": _pct("Perte maximale sur 1 an dans 97,5 % des cas (Cornish-Fisher, méthode PRIIPs)"),

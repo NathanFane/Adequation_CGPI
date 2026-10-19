@@ -11,6 +11,7 @@ import pandas as pd
 # Indicateurs filtrables : nom de colonne -> type ("liste" ou "nombre") ; pourcent = saisie en %
 LISTES = ["Classe d'actifs", "Zone", "Contrats", "Type", "SFDR", "Label ISR"]
 NOMBRES = {  # colonne: (en pourcentage ?)
+    "Historique (ans)": False, "Perf 3 mois": True, "Perf 6 mois": True, "Perf 1 an": True,
     "SRI": False, "Frais du fonds": True, "Frais totaux": True, "Rendement annuel": True, "Volatilité": True,
     "VaR 97,5 % 1 an": True, "Max Drawdown": True, "Pire mois": True, "Pire année": True,
     "Mois positifs": True, "Sharpe": False, "Sortino": False, "Calmar": False,

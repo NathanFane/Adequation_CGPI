@@ -2,7 +2,7 @@
 
 Ce fichier est lu automatiquement par Claude Code à l'ouverture du dépôt. Il résume tout ce qui a été
 décidé et construit. **À tenir à jour après chaque changement important.**
-Dernière mise à jour : 18 octobre 2026.
+Dernière mise à jour : 19 octobre 2026.
 
 ---
 
@@ -141,7 +141,7 @@ Variable `SIMULATION=1` : les scripts d'import lisent les fichiers sans rien éc
 
 ## 5. Base de données (Supabase)
 
-Schéma initial : `supabase/schema.sql`, puis migrations `002` à `017` (toutes exécutées par Nathan).
+Schéma initial : `supabase/schema.sql`, puis migrations `002` à `018` (`018` à exécuter par Nathan, les autres le sont).
 
 ### Tables
 | Table | Contenu |
@@ -171,7 +171,8 @@ contrats · 008 EPT · 009 `supports_contrat` · 010 colonnes Yahoo · 011 class
 `metriques_actuelles` · 012 vues complets/incomplets + rechargement Yahoo · 013 nouvelle recherche des
 tickers Yahoo · 014 **fonds uniquement** (suppression actions, ETF, SCPI…) · 015 nettoyage (incomplets
 sauf 10 exemples, sans SRI, volatilité > 60 %) + `fonds_exclus` · 016 `derniere_maj` · 017 nouvelles métriques
-(colonnes de `metriques`, vues `metriques_actuelles` et `produits_complets` + `frais_totaux`).
+(colonnes de `metriques`, vues `metriques_actuelles` et `produits_complets` + `frais_totaux`) · 018 perf 3 mois /
+6 mois / 1 an et `historique_annees`.
 
 ### État des données (17/10/2026)
 - **1 808 fonds complets** : 1 659 via Yahoo, 148 via EODHD, 1 en attente.
@@ -205,6 +206,8 @@ minimum **120 VL** (~6 mois) sinon pas de métrique.
 | Mois positifs, pire mois | Rendements mensuels de fin de mois (premier mois incomplet écarté) |
 | Pire année | Pire performance sur **12 mois glissants** (fins de mois) ; pas les années civiles (1re et dernière incomplètes) |
 | Skewness, kurtosis | Ceux de la VaR Cornish-Fisher (rendements log quotidiens ; kurtosis = excès) |
+| Perf 3 mois, 6 mois, 1 an | VL finale ÷ VL à la même date n mois plus tôt (ou dernière VL avant) − 1 ; vide si historique trop court. Servent à la stratégie momentum |
+| Historique (ans) | Durée couverte par les VL utilisées, **plafonnée à 5** (période de calcul ; 1 an pour EODHD) ; arrondie à 0,1. Filtre « Historique (ans) ≥ 3 / ≥ 5 » dans l'Univers. La date de création réelle du fonds n'est pas connue |
 | Frais totaux | Pas dans `metriques` : Univers = vue `produits_complets` ; Mes produits = frais du fonds + frais du contrat de l'utilisateur. Hors frais de versement/arbitrage |
 
 **Classe d'actifs** : d'abord la classification de l'assureur (mots-clés, `classe_assureur`), sinon la
@@ -308,13 +311,21 @@ pour enrichir l'univers. Les SCPI ont souvent un code interne au lieu d'un ISIN 
 1. **Nouvelles métriques** : codées le 18/10 (voir §6), migration `017` exécutée. Écartés car redondants :
    Treynor, Omega, Sterling, Martin, Ulcer. Les métriques de portefeuille (matrice de corrélation,
    contribution au risque, VaR du portefeuille) seront calculées à l'étape d'allocation.
-2. **Méthodes d'allocation** (prochaine étape prévue). Idée de Nathan : un score pondéré, par ex.
-   **SRI, Sharpe et coefficient de corrélation à 25 % chacun**. Questions encore ouvertes :
-   - quel est le **4e critère** pour arriver à 100 % (frais totaux ? VaR ? max drawdown ?) ;
-   - le SRI doit-il être un **critère du score** ou un **filtre** préalable selon le profil du client
-     (plus conforme à la DDA) ;
-   - proposition faite : décrire chaque méthode dans un fichier (critères, poids, sens, plafonds) ;
-     matrice de corrélation calculée à la volée au moment de l'allocation.
+2. **Stratégies d'allocation** (en cours de discussion, 19/10). Principe retenu : **la stratégie choisit les
+   fonds, le profil fixe la répartition entre classes d'actifs** ; les fonds sont comparés **au sein de chaque
+   classe d'actifs** (sinon les ratios favorisent monétaire et obligations). 7 stratégies validées par Nathan,
+   indépendantes du profil de risque :
+   1. Core-satellite (cœur : frais bas, R² élevé, faible tracking error ; satellites : alpha et IR élevés) ;
+   2. Low cost (frais totaux les plus bas) ;
+   3. Qualité / régularité (Sharpe, Sortino, Calmar, % de mois positifs) ;
+   4. Convictions (alpha, ratio d'information) ;
+   5. Momentum (perf 6 mois / 1 an) ;
+   6. Diversification maximale (faibles corrélations entre fonds, zones et classes variées) ;
+   7. ISR / durable (SFDR 8 ou 9, label ISR).
+   Impossibles faute de composition des fonds : value / croissance, petites capitalisations, secteurs.
+   Réserve : 1 et 4 reposent sur un indice choisi a posteriori. Reste à définir : pondération des fonds
+   (1/N, inverse volatilité, parité de risque, HRP), nombre de fonds, plafonds par fonds. Le Max Sharpe
+   (Markowitz) est déconseillé (instable, concentré).
 3. Questionnaire client, tables `clients` / `profils`, contrôle d'adéquation (marché cible EMT, SRI).
 4. Page de connexion (Supabase Auth) ; ensuite seulement partager le lien du site.
 5. Afficher les données EMT/EPT dans le tableau ; importer l'EET (SFDR) si un fichier est obtenu.
