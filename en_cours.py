@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page, retour_en_haut
+from navigation import retour_en_haut
 
 from base import db
 from collecte import _tout
@@ -52,5 +52,3 @@ else:
     if f_contrat:
         vue = vue[vue["Contrats"].apply(lambda v: any(c in v.split(", ") for c in f_contrat))]
     st.dataframe(vue.sort_values(["Raison", "Nom"]), hide_index=True, width="stretch", height=600)
-
-pied_de_page("en_cours.py")

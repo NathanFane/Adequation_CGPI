@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page, retour_en_haut
+from navigation import retour_en_haut
 
 from base import db
 from collecte import _tout
@@ -135,5 +135,3 @@ else:
             "SRI": st.column_config.NumberColumn(help="Indicateur synthétique de risque (1 à 7) publié par l'assureur"),
         },
     )
-
-pied_de_page("univers.py")

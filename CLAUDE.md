@@ -70,7 +70,7 @@ existe, sinon le seul profil de la table `utilisateurs`.
 ### Pages Streamlit (navigation cachée, liens en pied de page)
 | Fichier | Page |
 |---|---|
-| `app.py` | Routeur : `st.navigation([...], position="hidden")` ; page par défaut = `accueil.py` |
+| `app.py` | Routeur : `st.navigation([...], position="hidden")` ; page par défaut = `accueil.py`. Affiche le **pied de page avant le contenu** (contenu dans un `st.container()` réservé au-dessus) : liens visibles pendant le chargement et même si la page plante (erreur affichée par `st.exception`). Les pages n'appellent donc plus `pied_de_page` |
 | `accueil.py` | **Mes produits**. Onglet 1 « Visualiser » (par défaut), onglet 2 « Importer » |
 | `univers.py` | **Univers d'investissement** : tous les produits complets + section Filtres |
 | `en_cours.py` | **Produits en cours de référencement** (produits incomplets avec la raison) |

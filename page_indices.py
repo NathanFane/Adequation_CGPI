@@ -4,7 +4,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page, retour_en_haut
+from navigation import retour_en_haut
 
 from base import db
 from calculs import lire_indices, metriques, taux_sans_risque
@@ -83,5 +83,3 @@ choix = st.multiselect("Indices à afficher", list(vue["Indice"]), default=list(
                        max_selections=8)
 if choix:
     st.line_chart(pd.DataFrame({n: series[n] for n in choix if len(series[n])}))
-
-pied_de_page("page_indices.py")

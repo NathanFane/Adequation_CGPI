@@ -4,8 +4,6 @@ import io
 import pandas as pd
 import streamlit as st
 
-from navigation import pied_de_page
-
 from calculs import calculer_et_enregistrer
 from colonnes import CONFIG, METRIQUES as COLONNES_METRIQUES
 from collecte import _tout, actualiser
@@ -481,6 +479,3 @@ with onglet_liste:
                 st.session_state["dernier_enregistrement"] = precedent
                 st.session_state["version_tableau"] = st.session_state.get("version_tableau", 0) + 1
                 st.rerun()
-
-
-pied_de_page("accueil.py")
