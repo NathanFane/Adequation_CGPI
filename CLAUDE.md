@@ -141,7 +141,7 @@ Variable `SIMULATION=1` : les scripts d'import lisent les fichiers sans rien éc
 
 ## 5. Base de données (Supabase)
 
-Schéma initial : `supabase/schema.sql`, puis migrations `002` à `018` (`018` à exécuter par Nathan, les autres le sont).
+Schéma initial : `supabase/schema.sql`, puis migrations `002` à `018` (toutes exécutées par Nathan).
 
 ### Tables
 | Table | Contenu |
